@@ -4,100 +4,104 @@ function log(...args: any[]) {
     console.log('[PPO]', ...args);
 }
 
-type CallbackFunction = (alg: Algorithm) => boolean;
-type CallbackObject = {
-    onStep?: (alg: Algorithm) => boolean;
-    onTrainingStart?: (alg: Algorithm) => void;
-    onTrainingEnd?: (alg: Algorithm) => void;
-    onRolloutStart?: (alg: Algorithm) => void;
-    onRolloutEnd?: (alg: Algorithm) => void;
-};
-
 interface LearnConfig {
     totalTimesteps?: number;
     logInterval?: number;
-    callback?: BaseCallback | DictCallback | FunctionalCallback | null;
+    callback: any
 }
 
-interface Algorithm {
-    // Define the properties and methods expected in the 'alg' parameter
+type CallbackObject = {
+    onRolloutEnd: (p: PPO) => void;
+    onRolloutStart: (p: PPO) => void;
+    onTrainingEnd: (p: PPO) => void;
+    onTrainingStart: (p: PPO) => void;
+    onStep: (p: PPO) => boolean;
 }
 
 class BaseCallback {
     nCalls: number;
-
     constructor() {
-        this.nCalls = 0;
+        this.nCalls = 0
     }
 
-    _onStep(alg: Algorithm): boolean { return true; }
-    onStep(alg: Algorithm): boolean {
-        this.nCalls += 1;
-        return this._onStep(alg);
+    _onStep(alg: any) { return true }
+    onStep(alg: any) {
+        this.nCalls += 1
+        return this._onStep(alg)
     }
 
-    _onTrainingStart(alg: Algorithm): void {}
-    onTrainingStart(alg: Algorithm): void {
-        this._onTrainingStart(alg);
+    _onTrainingStart(alg: any) {}
+    onTrainingStart(alg: any) {
+        this._onTrainingStart(alg)
     }
 
-    _onTrainingEnd(alg: Algorithm): void {}
-    onTrainingEnd(alg: Algorithm): void {
-        this._onTrainingEnd(alg);
+    _onTrainingEnd(alg: any) {}
+    onTrainingEnd(alg: any) {
+        this._onTrainingEnd(alg)
     }
 
-    _onRolloutStart(alg: Algorithm): void {}
-    onRolloutStart(alg: Algorithm): void {
-        this._onRolloutStart(alg);
+    _onRolloutStart(alg: any) {}
+    onRolloutStart(alg: any) {
+        this._onRolloutStart(alg)
     }
 
-    _onRolloutEnd(alg: Algorithm): void {}
-    onRolloutEnd(alg: Algorithm): void {
-        this._onRolloutEnd(alg);
+    _onRolloutEnd(alg: any) {}
+    onRolloutEnd(alg: any) {
+        this._onRolloutEnd(alg)
     }
 }
 
 class FunctionalCallback extends BaseCallback {
-    callback: (alg: Algorithm) => boolean;
-
-    constructor(callback: (alg: Algorithm) => boolean) {
-        super();
-        this.callback = callback;
+    callback: any;
+    constructor(callback: any) {
+        super()
+        this.callback = callback
     }
 
-    _onStep(alg: Algorithm): boolean {
+    _onStep(alg: this) {
         if (this.callback) {
-            return this.callback(alg);
+            return this.callback(alg)
         }
-        return true;
+        return true
     }
 }
 
 class DictCallback extends BaseCallback {
-    callback: {
-        onStep?: (alg: Algorithm) => boolean;
-        onTrainingStart?: (alg: Algorithm) => void;
-        onTrainingEnd?: (alg: Algorithm) => void;
-        onRolloutStart?: (alg: Algorithm) => void;
-        onRolloutEnd?: (alg: Algorithm) => void;
-    };
-
-    constructor(callback: {
-        onStep?: (alg: Algorithm) => boolean;
-        onTrainingStart?: (alg: Algorithm) => void;
-        onTrainingEnd?: (alg: Algorithm) => void;
-        onRolloutStart?: (alg: Algorithm) => void;
-        onRolloutEnd?: (alg: Algorithm) => void;
-    }) {
-        super();
-        this.callback = callback;
+    callback: CallbackObject;
+    constructor(callback: CallbackObject) {
+        super()
+        this.callback = callback
     }
 
-    _onStep(alg: Algorithm): boolean {
+    _onStep(alg: any) {
         if (this.callback && this.callback.onStep) {
-            return this.callback.onStep(alg);
+            return this.callback.onStep(alg)
         }
-        return true;
+        return true
+    }
+    
+    _onTrainingStart(alg: any) {
+        if (this.callback && this.callback.onTrainingStart) {
+            this.callback.onTrainingStart(alg)
+        }
+    }
+
+    _onTrainingEnd(alg: any) {
+        if (this.callback && this.callback.onTrainingEnd) {
+            this.callback.onTrainingEnd(alg)
+        }
+    }
+
+    _onRolloutStart(alg: any) {
+        if (this.callback && this.callback.onRolloutStart) {
+            this.callback.onRolloutStart(alg)
+        }
+    }
+
+    _onRolloutEnd(alg: any) {
+        if (this.callback && this.callback.onRolloutEnd) {
+            this.callback.onRolloutEnd(alg)
+        }
     }
 }
 
@@ -215,7 +219,7 @@ interface PPOConfig {
     verbose?: number;
 }
 
-class PPO {
+export class PPO {
     config: PPOConfig;
     env: any;
     numTimesteps: number;
@@ -459,7 +463,7 @@ class PPO {
         });
     }
 
-    _initCallback(callback: CallbackFunction | CallbackObject | BaseCallback | null): BaseCallback {
+    _initCallback(callback: CallbackObject | BaseCallback | null): BaseCallback {
         if (typeof callback === 'function') {
             // Convert to 'unknown' first, then to the constructor type
             const callbackConstructor = callback as unknown as new () => BaseCallback;
@@ -486,12 +490,12 @@ class PPO {
     
         for (let step = 0; step < this.config.nSteps!; step++) {
             // Predict action, value, and logprobability from last observation
-            const [preds, action, value, logprobability] = tf.tidy(() => {
+                const [preds, action, value, logprobability] = tf.tidy(() => {
                 const lastObservationT = tf.tensor([this.lastObservation]);
                 const [predsT, actionT] = this.sampleAction(lastObservationT);
                 const valueT = this.critic.predict(lastObservationT) as tf.Tensor;
                 const logprobabilityT = this.logProb(predsT, actionT);
-                const logprobabilityNum: number = Array.isArray(logprobability) ? logprobability[0] : logprobability;
+                const logprobabilityNum: number = Array.isArray(logprobabilityT) ? logprobabilityT[0] : logprobabilityT;
                 const valueT_data: any = valueT.arraySync();
 
                 return [
@@ -545,6 +549,9 @@ class PPO {
             logprobabilityBuffer,
         ] = this.buffer.get();
     
+        const actionBufferShape = Array.isArray(actionBuffer[0]) ? [actionBuffer.length, actionBuffer[0].length] : [actionBuffer.length];
+        console.log(actionBufferShape);
+
         const [
             observationBufferT,
             actionBufferT,
@@ -553,7 +560,7 @@ class PPO {
             logprobabilityBufferT
         ] = tf.tidy(() => [
                 tf.tensor(observationBuffer),
-                tf.tensor(actionBuffer, this.env.actionSpace.dtype as number[]),
+                tf.tensor(actionBuffer, actionBufferShape),
                 tf.tensor(advantageBuffer),
                 tf.tensor(returnBuffer).reshape([-1, 1]),
                 tf.tensor(logprobabilityBuffer)

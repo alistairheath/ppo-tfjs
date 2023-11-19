@@ -32,6 +32,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.PPO = void 0;
 const tf = __importStar(require("@tensorflow/tfjs"));
 function log(...args) {
     console.log('[PPO]', ...args);
@@ -84,6 +85,26 @@ class DictCallback extends BaseCallback {
             return this.callback.onStep(alg);
         }
         return true;
+    }
+    _onTrainingStart(alg) {
+        if (this.callback && this.callback.onTrainingStart) {
+            this.callback.onTrainingStart(alg);
+        }
+    }
+    _onTrainingEnd(alg) {
+        if (this.callback && this.callback.onTrainingEnd) {
+            this.callback.onTrainingEnd(alg);
+        }
+    }
+    _onRolloutStart(alg) {
+        if (this.callback && this.callback.onRolloutStart) {
+            this.callback.onRolloutStart(alg);
+        }
+    }
+    _onRolloutEnd(alg) {
+        if (this.callback && this.callback.onRolloutEnd) {
+            this.callback.onRolloutEnd(alg);
+        }
     }
 }
 class Buffer {
@@ -369,7 +390,7 @@ class PPO {
                     const [predsT, actionT] = this.sampleAction(lastObservationT);
                     const valueT = this.critic.predict(lastObservationT);
                     const logprobabilityT = this.logProb(predsT, actionT);
-                    const logprobabilityNum = Array.isArray(logprobability) ? logprobability[0] : logprobability;
+                    const logprobabilityNum = Array.isArray(logprobabilityT) ? logprobabilityT[0] : logprobabilityT;
                     const valueT_data = valueT.arraySync();
                     return [
                         predsT.arraySync(),
@@ -403,9 +424,11 @@ class PPO {
         return __awaiter(this, void 0, void 0, function* () {
             // Get values from the buffer
             const [observationBuffer, actionBuffer, advantageBuffer, returnBuffer, logprobabilityBuffer,] = this.buffer.get();
+            const actionBufferShape = Array.isArray(actionBuffer[0]) ? [actionBuffer.length, actionBuffer[0].length] : [actionBuffer.length];
+            console.log(actionBufferShape);
             const [observationBufferT, actionBufferT, advantageBufferT, returnBufferT, logprobabilityBufferT] = tf.tidy(() => [
                 tf.tensor(observationBuffer),
-                tf.tensor(actionBuffer, this.env.actionSpace.dtype),
+                tf.tensor(actionBuffer, actionBufferShape),
                 tf.tensor(advantageBuffer),
                 tf.tensor(returnBuffer).reshape([-1, 1]),
                 tf.tensor(logprobabilityBuffer)
@@ -451,6 +474,7 @@ class PPO {
         });
     }
 }
+exports.PPO = PPO;
 if (typeof module === 'object' && module.exports) {
     module.exports = PPO;
 }
