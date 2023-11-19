@@ -58,7 +58,7 @@ class FunctionalCallback extends BaseCallback {
         this.callback = callback
     }
 
-    _onStep(alg: this) {
+    override _onStep(alg: this) {
         if (this.callback) {
             return this.callback(alg)
         }
@@ -73,32 +73,32 @@ class DictCallback extends BaseCallback {
         this.callback = callback
     }
 
-    _onStep(alg: any) {
+    override _onStep(alg: any) {
         if (this.callback && this.callback.onStep) {
             return this.callback.onStep(alg)
         }
         return true
     }
     
-    _onTrainingStart(alg: any) {
+    override _onTrainingStart(alg: any) {
         if (this.callback && this.callback.onTrainingStart) {
             this.callback.onTrainingStart(alg)
         }
     }
 
-    _onTrainingEnd(alg: any) {
+    override _onTrainingEnd(alg: any) {
         if (this.callback && this.callback.onTrainingEnd) {
             this.callback.onTrainingEnd(alg)
         }
     }
 
-    _onRolloutStart(alg: any) {
+    override _onRolloutStart(alg: any) {
         if (this.callback && this.callback.onRolloutStart) {
             this.callback.onRolloutStart(alg)
         }
     }
 
-    _onRolloutEnd(alg: any) {
+    override _onRolloutEnd(alg: any) {
         if (this.callback && this.callback.onRolloutEnd) {
             this.callback.onRolloutEnd(alg)
         }
