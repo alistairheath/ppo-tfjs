@@ -425,7 +425,6 @@ class PPO {
             // Get values from the buffer
             const [observationBuffer, actionBuffer, advantageBuffer, returnBuffer, logprobabilityBuffer,] = this.buffer.get();
             const actionBufferShape = Array.isArray(actionBuffer[0]) ? [actionBuffer.length, actionBuffer[0].length] : [actionBuffer.length];
-            console.log(actionBufferShape);
             const [observationBufferT, actionBufferT, advantageBufferT, returnBufferT, logprobabilityBufferT] = tf.tidy(() => [
                 tf.tensor(observationBuffer),
                 tf.tensor(actionBuffer, actionBufferShape),
@@ -475,6 +474,3 @@ class PPO {
     }
 }
 exports.PPO = PPO;
-if (typeof module === 'object' && module.exports) {
-    module.exports = PPO;
-}

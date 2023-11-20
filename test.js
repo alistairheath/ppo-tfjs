@@ -1,6 +1,8 @@
 const tf = require('@tensorflow/tfjs-node-gpu');
 const PPO = require('./dist/ppo.js');
 
+console.log(PPO);
+
 class EnvDiscrete {
     constructor() {
         this.actionSpace = {

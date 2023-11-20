@@ -550,7 +550,6 @@ export class PPO {
         ] = this.buffer.get();
     
         const actionBufferShape = Array.isArray(actionBuffer[0]) ? [actionBuffer.length, actionBuffer[0].length] : [actionBuffer.length];
-        console.log(actionBufferShape);
 
         const [
             observationBufferT,
@@ -617,7 +616,3 @@ export class PPO {
         callback.onTrainingEnd(this);
     }
 }
-
-//if (typeof module === 'object' && module.exports) {
-    module.exports = PPO
-//}
