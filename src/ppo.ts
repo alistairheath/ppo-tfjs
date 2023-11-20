@@ -618,6 +618,6 @@ export class PPO {
     }
 }
 
-if (typeof module === 'object' && module.exports) {
+//if (typeof module === 'object' && module.exports) {
     module.exports = PPO
-}
+//}
