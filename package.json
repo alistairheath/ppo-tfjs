@@ -10,7 +10,6 @@
   ],
   "main": "dist/index.js",
   "types": "src/index.ts",
-  "target": "es2022",
   "scripts": {
     "build": "tsc",
     "test": "jest",
@@ -21,6 +20,10 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/zemlyansky/ppo-tfjs.git"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.13.0",
+    "@tensorflow/tfjs-node-gpu": "^3.21.0"
   },
   "devDependencies": {
     "@tensorflow/tfjs-node-gpu": "^3.21.0",
