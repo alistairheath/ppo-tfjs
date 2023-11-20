@@ -1,5 +1,7 @@
-const tf = require('@tensorflow/tfjs-node-gpu')
-const PPO = require('./ppo.js')
+const tf = require('@tensorflow/tfjs-node-gpu');
+const PPO = require('./dist/ppo.js');
+
+console.log(PPO);
 
 class EnvDiscrete {
     constructor() {
