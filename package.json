@@ -8,7 +8,9 @@
     "tensorflow.js",
     "tfjs"
   ],
-  "main": "ppo.js",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
+  "target": "es2022",
   "scripts": {
     "build": "tsc",
     "test": "jest",
