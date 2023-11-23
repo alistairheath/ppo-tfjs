@@ -514,7 +514,7 @@ export class PPO {
             // Update global timestep counter
             this.numTimesteps += 1;
     
-            callback.onStep(this);
+            callback.onStep({ppo: this, action, reward, done});
     
             this.buffer.add(
                 this.lastObservation,
@@ -615,4 +615,80 @@ export class PPO {
         
         callback.onTrainingEnd(this);
     }
+
+    _serialize(object:any = this) {
+        const attributes: any = {};
+        for (const key in object) {
+            if (object.hasOwnProperty(key) && typeof object[key] !== 'function' && !(object[key] instanceof tf.LayersModel)) {
+                attributes[key] = object[key];
+            }
+        }
+
+        return attributes
+    }
+
+    _deserialize(data: any, object:any=this) {
+        for (const key in data) {
+            if (data.hasOwnProperty(key) && object.hasOwnProperty(key)) {
+                object[key] = data[key];
+            }
+        }
+    }
+
+    async _convertModelWeightsToJSON(model: tf.LayersModel) {
+        const weights = model.getWeights();
+        const weightData = weights.map(w => w.arraySync());
+        return weightData;
+    }
+
+    async toJSON(): Promise<string> {
+        //Get PPO Attributes
+        const model_object = this._serialize();
+        model_object['buffer'] = this._serialize(this.buffer); 
+        
+        const [ actor_w , critic_w ] = await Promise.all([
+            this._convertModelWeightsToJSON(this.actor),
+            this._convertModelWeightsToJSON(this.critic)
+        ]);
+        
+        model_object['actor'] = {
+            'architecture': this.actor.toJSON(null, false),
+            'weights': actor_w
+        }
+
+        model_object['critic'] = {
+            'architecture': this.critic.toJSON(null, false),
+            'weights': critic_w
+        }
+
+        const model_json = JSON.stringify(model_object);
+        return model_json
+    }
+
+    async fromJSON(jsonString: string) {
+        const modelObject = JSON.parse(jsonString);
+
+        // Rebuild the PPO Config & Buffer
+        this.config = modelObject.config;
+        this._deserialize(modelObject.buffer, this.buffer);
+
+        // Rebuild the actor and critic models
+        this.actor = await this._rebuildModelFromJSON(modelObject.actor);
+        this.critic = await this._rebuildModelFromJSON(modelObject.critic);
+    }
+
+    async _rebuildModelFromJSON(modelData: any) {
+        // Create a model from the architecture
+        const model = await tf.loadLayersModel(tf.io.fromMemory(modelData.architecture));
+
+        // Restore the weights
+        const weights = modelData.weights.map((w: number) => tf.tensor(w));
+        model.setWeights(weights);
+
+        return model;
+    }
+}
+
+if (typeof module === 'object' && module.exports) {
+    module.exports = PPO
 }

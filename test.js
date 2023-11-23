@@ -1,5 +1,4 @@
-const tf = require('@tensorflow/tfjs-node-gpu');
-const PPO = require('./dist/ppo.js');
+import PPO from './dist/index.js';
 
 console.log(PPO);
 
