@@ -494,8 +494,7 @@ export class PPO {
                 const lastObservationT = tf.tensor([this.lastObservation]);
                 const [predsT, actionT] = this.sampleAction(lastObservationT);
                 const valueT = this.critic.predict(lastObservationT) as tf.Tensor;
-                const logprobabilityT = this.logProb(predsT, actionT);
-                const logprobabilityNum: number = Array.isArray(logprobabilityT) ? logprobabilityT[0] : logprobabilityT;
+                const logprobabilityNum: number = (this.logProb(predsT, actionT) as tf.Tensor1D).dataSync()[0];
                 const valueT_data: any = valueT.arraySync();
 
                 return [
