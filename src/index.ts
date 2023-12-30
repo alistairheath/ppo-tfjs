@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
+import * as fs from 'fs';
 
 function log(...args: any[]) {
     console.log('[PPO]', ...args);
@@ -225,8 +226,8 @@ export class PPO {
     numTimesteps: number;
     lastObservation: any;
     buffer: Buffer;
-    actor: any;
-    critic: any;
+    actor: tf.LayersModel;
+    critic: tf.LayersModel;
     logStd: any;
     optPolicy: any;
     optValue: any;
@@ -344,7 +345,7 @@ export class PPO {
 
     sampleAction(observationT: tf.Tensor): [tf.Tensor, tf.Tensor] {
         return tf.tidy(() => {
-            const preds = tf.squeeze(this.actor.predict(observationT), [0]);
+            const preds = tf.squeeze(this.actor.predict(observationT) as tf.Tensor, [0]);
             let action: tf.Tensor;
 
             if (this.env.actionSpace.class === 'Discrete') {
@@ -409,7 +410,7 @@ export class PPO {
     }
     
     predict(observation: tf.Tensor, deterministic: boolean = false): tf.Tensor {
-        return this.actor.predict(observation);
+        return this.actor.predict(observation) as tf.Tensor;
     }
 
     trainPolicy(
@@ -528,7 +529,10 @@ export class PPO {
             if (done || step === this.config.nSteps! - 1){
                 const lastValue = done 
                     ? 0 
-                    : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0];
+                    : tf.tidy(() => {
+                        const prediction = this.critic.predict(tf.tensor([newObservation])) as tf.Tensor2D;
+                        return prediction.arraySync()[0][0] as number;
+                    });
                 this.buffer.finishTrajectory(lastValue);
                 numEpisodes += 1;
                 this.lastObservation = await this.env.reset();
@@ -686,8 +690,70 @@ export class PPO {
 
         return model;
     }
+
+    _checkPackageSave(path: string) {
+        //Check if Running in Node - and Throw an Error If Not
+        if (typeof window !== 'undefined') {
+            throw new Error('This method only works in node');
+        }
+
+        //Check if Path Exists - and Throw an Error If Not
+        if (!fs.existsSync(path)) {
+            throw new Error('Path does not exist');
+        }
+
+        return true
+    }
+
+    async savePackage(path: string, callback?: Function) {
+        this._checkPackageSave(path);
+        //Save the Actor and Critic Models
+        fs.mkdirSync(`${path}/actor`, { recursive: true });
+        fs.mkdirSync(`${path}/critic`, { recursive: true });
+        
+        //Save the PPO Config & Buffer
+        const model_object = this._serialize();
+        model_object['buffer'] = this._serialize(this.buffer); 
+        const model_json = JSON.stringify(model_object);
+
+        const saved_models = Promise.all([
+            fs.writeFile(`${path}/model.json`, model_json, 'utf-8', () => {}),
+            this.actor.save(`file://${path}/actor`),
+            this.critic.save(`file://${path}/critic`),
+        ]);
+
+        if (callback){
+            saved_models.catch((err: any) => { throw new Error(err) }).finally(() => callback());
+        } else {
+            saved_models.catch((err: any) => { throw new Error(err) });
+        }
+    }
+
+    async loadPackage(path: string, callback?: Function) {
+        this._checkPackageSave(path);
+
+        //Load the Actor and Critic Models
+        const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');
+        const model_object = JSON.parse(model_json);
+        const [ actor, critic ] = await Promise.all([
+            tf.loadLayersModel(`file://${path}/actor/model.json`),
+            tf.loadLayersModel(`file://${path}/critic/model.json`),
+        ]);
+
+        // Rebuild the PPO Config & Buffer
+        this.config = model_object.config;
+        this._deserialize(model_object.buffer, this.buffer);
+
+        // Rebuild the actor and critic models
+        this.actor = actor;
+        this.critic = critic;
+
+        if (callback){
+            callback();
+        }
+    }
 }
 
 if (typeof module === 'object' && module.exports) {
-    module.exports = PPO
+    module.exports = PPO;
 }

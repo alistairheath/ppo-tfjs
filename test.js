@@ -1,6 +1,5 @@
-import PPO from './dist/index.js';
-
-console.log(PPO);
+import { PPO } from './dist/index.js';
+const tf = await import('@tensorflow/tfjs-node');
 
 class EnvDiscrete {
     constructor() {
@@ -80,28 +79,31 @@ class EnvContinuous {
     }
 }
 
-test('PPO Learn (Discrete)', async () => {
+const discrete_test = async () => {
     var env = new EnvDiscrete()
     var ppo = new PPO(env, {'nSteps': 50})
     await ppo.learn({
-        'totalTimesteps': 100,
+        'totalTimesteps': 1000,
         'callback': {
             'onTrainingStart': function (p) {
                 console.log(p.config)
             }
         }
-    })
-})
+    });
+};
 
-test('PPO Learn (Continuos)', async () => {
+const continuous_test = async () => {
     var env = new EnvContinuous()
     var ppo = new PPO(env, {'nSteps': 50})
     await ppo.learn({
-        'totalTimesteps': 100,
+        'totalTimesteps': 1000,
         'callback': {
             'onTrainingStart': function (p) {
                 console.log(p.config)
             }
         }
     })
-})
+};
+
+await discrete_test().catch((err) => console.log(err)).finally(() => console.log('Discrete Test Complete'));
+await continuous_test().catch((err) => console.log(err)).finally(() => console.log('Continuous Test Complete'));

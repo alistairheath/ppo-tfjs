@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
+import * as fs from 'fs';
 function log(...args) {
     console.log('[PPO]', ...args);
 }
@@ -350,8 +351,7 @@ export class PPO {
                 const lastObservationT = tf.tensor([this.lastObservation]);
                 const [predsT, actionT] = this.sampleAction(lastObservationT);
                 const valueT = this.critic.predict(lastObservationT);
-                const logprobabilityT = this.logProb(predsT, actionT);
-                const logprobabilityNum = Array.isArray(logprobabilityT) ? logprobabilityT[0] : logprobabilityT;
+                const logprobabilityNum = this.logProb(predsT, actionT).dataSync()[0];
                 const valueT_data = valueT.arraySync();
                 return [
                     predsT.arraySync(),
@@ -372,7 +372,10 @@ export class PPO {
             if (done || step === this.config.nSteps - 1) {
                 const lastValue = done
                     ? 0
-                    : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0];
+                    : tf.tidy(() => {
+                        const prediction = this.critic.predict(tf.tensor([newObservation]));
+                        return prediction.arraySync()[0][0];
+                    });
                 this.buffer.finishTrajectory(lastValue);
                 numEpisodes += 1;
                 this.lastObservation = await this.env.reset();
@@ -484,6 +487,57 @@ export class PPO {
         const weights = modelData.weights.map((w) => tf.tensor(w));
         model.setWeights(weights);
         return model;
+    }
+    _checkPackageSave(path) {
+        //Check if Running in Node - and Throw an Error If Not
+        if (typeof window !== 'undefined') {
+            throw new Error('This method only works in node');
+        }
+        //Check if Path Exists - and Throw an Error If Not
+        if (!fs.existsSync(path)) {
+            throw new Error('Path does not exist');
+        }
+        return true;
+    }
+    async savePackage(path, callback) {
+        this._checkPackageSave(path);
+        //Save the Actor and Critic Models
+        fs.mkdirSync(`${path}/actor`, { recursive: true });
+        fs.mkdirSync(`${path}/critic`, { recursive: true });
+        //Save the PPO Config & Buffer
+        const model_object = this._serialize();
+        model_object['buffer'] = this._serialize(this.buffer);
+        const model_json = JSON.stringify(model_object);
+        const saved_models = Promise.all([
+            fs.writeFile(`${path}/model.json`, model_json, 'utf-8', () => { }),
+            this.actor.save(`file://${path}/actor`),
+            this.critic.save(`file://${path}/critic`),
+        ]);
+        if (callback) {
+            saved_models.catch((err) => { throw new Error(err); }).finally(() => callback());
+        }
+        else {
+            saved_models.catch((err) => { throw new Error(err); });
+        }
+    }
+    async loadPackage(path, callback) {
+        this._checkPackageSave(path);
+        //Load the Actor and Critic Models
+        const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');
+        const model_object = JSON.parse(model_json);
+        const [actor, critic] = await Promise.all([
+            tf.loadLayersModel(`file://${path}/actor/model.json`),
+            tf.loadLayersModel(`file://${path}/critic/model.json`),
+        ]);
+        // Rebuild the PPO Config & Buffer
+        this.config = model_object.config;
+        this._deserialize(model_object.buffer, this.buffer);
+        // Rebuild the actor and critic models
+        this.actor = actor;
+        this.critic = critic;
+        if (callback) {
+            callback();
+        }
     }
 }
 if (typeof module === 'object' && module.exports) {
