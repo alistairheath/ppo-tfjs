@@ -231,6 +231,7 @@ export class PPO {
     logStd: any;
     optPolicy: any;
     optValue: any;
+    randomSeed: number = 0;
     log: (...args: any[]) => void;
 
     constructor(env: any, config: PPOConfig) {
@@ -349,11 +350,11 @@ export class PPO {
             let action: tf.Tensor;
 
             if (this.env.actionSpace.class === 'Discrete') {
-                action = tf.squeeze(tf.multinomial(preds as tf.Tensor2D, 1), [0]); // For discrete action space
+                action = tf.squeeze(tf.multinomial(preds as tf.Tensor2D, 1, this.randomSeed), [0]); // For discrete action space
             } else if (this.env.actionSpace.class === 'Box') {
                 action = tf.add(
                     tf.mul(
-                        tf.randomStandardNormal([this.env.actionSpace.shape[0]]), 
+                        tf.randomStandardNormal([this.env.actionSpace.shape[0]], 'float32', this.randomSeed), 
                         tf.exp(this.logStd)
                     ),
                     preds
@@ -476,7 +477,6 @@ export class PPO {
         return new BaseCallback();
     }
     
-
     async collectRollouts(callback: BaseCallback): Promise<void> {
         if (this.lastObservation === null) {
             this.lastObservation = await this.env.reset();
@@ -751,6 +751,10 @@ export class PPO {
         if (callback){
             callback();
         }
+    }
+
+    setRandomSeed(seed: number) {
+        this.randomSeed = seed;
     }
 }
 

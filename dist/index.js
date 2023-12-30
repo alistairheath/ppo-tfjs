@@ -158,6 +158,7 @@ class Buffer {
 }
 export class PPO {
     constructor(env, config) {
+        this.randomSeed = 0;
         const configDefault = {
             nSteps: 512,
             nEpochs: 10,
@@ -257,10 +258,10 @@ export class PPO {
             const preds = tf.squeeze(this.actor.predict(observationT), [0]);
             let action;
             if (this.env.actionSpace.class === 'Discrete') {
-                action = tf.squeeze(tf.multinomial(preds, 1), [0]); // For discrete action space
+                action = tf.squeeze(tf.multinomial(preds, 1, this.randomSeed), [0]); // For discrete action space
             }
             else if (this.env.actionSpace.class === 'Box') {
-                action = tf.add(tf.mul(tf.randomStandardNormal([this.env.actionSpace.shape[0]]), tf.exp(this.logStd)), preds); // For continuous action space
+                action = tf.add(tf.mul(tf.randomStandardNormal([this.env.actionSpace.shape[0]], 'float32', this.randomSeed), tf.exp(this.logStd)), preds); // For continuous action space
             }
             else {
                 throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
@@ -538,6 +539,9 @@ export class PPO {
         if (callback) {
             callback();
         }
+    }
+    setRandomSeed(seed) {
+        this.randomSeed = seed;
     }
 }
 if (typeof module === 'object' && module.exports) {
