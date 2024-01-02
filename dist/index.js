@@ -303,7 +303,7 @@ export class PPO {
     predictAction(observation, deterministic = false) {
         const action = tf.tidy(() => {
             const pred = tf.squeeze(this.predict(observation, true), [0]);
-            const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1), [0]);
+            const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1, this.randomSeed), [0]);
             const action = actions.dataSync()[0];
             return action;
         });
