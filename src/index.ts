@@ -723,9 +723,9 @@ export class PPO {
         ]);
 
         if (callback){
-            saved_models.catch((err: any) => { throw new Error(err) }).finally(() => callback());
+            await saved_models.catch((err: any) => { throw new Error(err) }).finally(() => callback());
         } else {
-            saved_models.catch((err: any) => { throw new Error(err) });
+            await saved_models.catch((err: any) => { throw new Error(err) });
         }
     }
 

@@ -515,10 +515,10 @@ export class PPO {
             this.critic.save(`file://${path}/critic`),
         ]);
         if (callback) {
-            saved_models.catch((err) => { throw new Error(err); }).finally(() => callback());
+            await saved_models.catch((err) => { throw new Error(err); }).finally(() => callback());
         }
         else {
-            saved_models.catch((err) => { throw new Error(err); });
+            await saved_models.catch((err) => { throw new Error(err); });
         }
     }
     async loadPackage(path, callback) {
