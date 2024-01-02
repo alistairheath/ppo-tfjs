@@ -25,29 +25,29 @@ class BaseCallback {
         this.nCalls = 0
     }
 
-    _onStep(alg: any) { return true }
-    onStep(alg: any) {
+    async _onStep(alg: any) { return true }
+    async onStep(alg: any) {
         this.nCalls += 1
         return this._onStep(alg)
     }
 
-    _onTrainingStart(alg: any) {}
-    onTrainingStart(alg: any) {
+    async _onTrainingStart(alg: any) {}
+    async onTrainingStart(alg: any) {
         this._onTrainingStart(alg)
     }
 
-    _onTrainingEnd(alg: any) {}
-    onTrainingEnd(alg: any) {
+    async _onTrainingEnd(alg: any) {}
+    async onTrainingEnd(alg: any) {
         this._onTrainingEnd(alg)
     }
 
-    _onRolloutStart(alg: any) {}
-    onRolloutStart(alg: any) {
+    async _onRolloutStart(alg: any) {}
+    async onRolloutStart(alg: any) {
         this._onRolloutStart(alg)
     }
 
-    _onRolloutEnd(alg: any) {}
-    onRolloutEnd(alg: any) {
+    async _onRolloutEnd(alg: any) {}
+    async onRolloutEnd(alg: any) {
         this._onRolloutEnd(alg)
     }
 }
@@ -59,7 +59,7 @@ class FunctionalCallback extends BaseCallback {
         this.callback = callback
     }
 
-    override _onStep(alg: this) {
+    override async _onStep(alg: this) {
         if (this.callback) {
             return this.callback(alg)
         }
@@ -74,32 +74,32 @@ class DictCallback extends BaseCallback {
         this.callback = callback
     }
 
-    override _onStep(alg: any) {
+    override async _onStep(alg: any) {
         if (this.callback && this.callback.onStep) {
             return this.callback.onStep(alg)
         }
         return true
     }
     
-    override _onTrainingStart(alg: any) {
+    override async _onTrainingStart(alg: any) {
         if (this.callback && this.callback.onTrainingStart) {
             this.callback.onTrainingStart(alg)
         }
     }
 
-    override _onTrainingEnd(alg: any) {
+    override async _onTrainingEnd(alg: any) {
         if (this.callback && this.callback.onTrainingEnd) {
             this.callback.onTrainingEnd(alg)
         }
     }
 
-    override _onRolloutStart(alg: any) {
+    override async _onRolloutStart(alg: any) {
         if (this.callback && this.callback.onRolloutStart) {
             this.callback.onRolloutStart(alg)
         }
     }
 
-    override _onRolloutEnd(alg: any) {
+    override async _onRolloutEnd(alg: any) {
         if (this.callback && this.callback.onRolloutEnd) {
             this.callback.onRolloutEnd(alg)
         }
@@ -483,7 +483,7 @@ export class PPO {
         }
     
         this.buffer.reset();
-        callback.onRolloutStart(this);
+        await callback.onRolloutStart(this);
     
         let sumReturn = 0;
         let sumLength = 0;
@@ -514,7 +514,7 @@ export class PPO {
             // Update global timestep counter
             this.numTimesteps += 1;
     
-            callback.onStep({ppo: this, action, reward, done});
+            await callback.onStep({ppo: this, action, reward, done});
     
             this.buffer.add(
                 this.lastObservation,
@@ -539,7 +539,7 @@ export class PPO {
             }
         }
     
-        callback.onRolloutEnd(this);
+        await callback.onRolloutEnd(this);
     }
 
     async train() {
@@ -605,7 +605,7 @@ export class PPO {
         
         let iteration = 0;
         
-        callback.onTrainingStart(this);
+        await callback.onTrainingStart(this);
     
         while (this.numTimesteps < totalTimesteps) {
             await this.collectRollouts(callback);
@@ -616,7 +616,7 @@ export class PPO {
             await this.train();
         }
         
-        callback.onTrainingEnd(this);
+        await callback.onTrainingEnd(this);
     }
 
     _serialize(object:any = this) {
