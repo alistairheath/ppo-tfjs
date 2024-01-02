@@ -410,8 +410,22 @@ export class PPO {
         }
     }
     
-    predict(observation: tf.Tensor, deterministic: boolean = false): tf.Tensor {
+    predict(observation: tf.Tensor | number[], deterministic: boolean = false): tf.Tensor {
+        if (observation instanceof Array) {
+            observation = tf.tensor2d(observation, [1,observation.length]);
+        }
+
         return this.actor.predict(observation) as tf.Tensor;
+    }
+
+    predictAction(observation: tf.Tensor | number[], deterministic: boolean = false): number {
+        const action = tf.tidy(() => {
+            const pred = tf.squeeze(this.predict(observation, true), [0]);
+            const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1), [0]);
+            const action = actions.dataSync()[0];
+            return action;
+        });
+        return action
     }
 
     trainPolicy(

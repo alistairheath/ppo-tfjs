@@ -295,7 +295,19 @@ export class PPO {
         }
     }
     predict(observation, deterministic = false) {
+        if (observation instanceof Array) {
+            observation = tf.tensor2d(observation, [1, observation.length]);
+        }
         return this.actor.predict(observation);
+    }
+    predictAction(observation, deterministic = false) {
+        const action = tf.tidy(() => {
+            const pred = tf.squeeze(this.predict(observation, true), [0]);
+            const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1), [0]);
+            const action = actions.dataSync()[0];
+            return action;
+        });
+        return action;
     }
     trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT) {
         const clipRatio = this.config.clipRatio ?? 0.2; // Provide a default value if undefined
