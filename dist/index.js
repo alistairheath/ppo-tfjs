@@ -294,7 +294,7 @@ export class PPO {
             throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
         }
     }
-    predict(observation, deterministic = false) {
+    predict(observation) {
         if (observation instanceof Array) {
             observation = tf.tensor2d(observation, [1, observation.length]);
         }
@@ -315,10 +315,25 @@ export class PPO {
         const indexOfMax = tf.argMax(normalizedProbabilities).dataSync()[0];
         return indexOfMax;
     }
+    predictProbabilities(observation) {
+        const probsArray = tf.tidy(() => {
+            const logProbabilities = tf.squeeze(this.predict(observation), [0]);
+            if (logProbabilities instanceof tf.Tensor) {
+                return logProbabilities.dataSync();
+            }
+            else {
+                return logProbabilities;
+            }
+        });
+        const probabilities = tf.exp(probsArray);
+        const sum = tf.sum(probabilities);
+        const normalizedProbabilities = probabilities.div(sum);
+        return normalizedProbabilities.arraySync();
+    }
     predictAction(observation, deterministic = false) {
         if (deterministic) {
             const action = tf.tidy(() => {
-                const pred = tf.squeeze(this.predict(observation, true), [0]);
+                const pred = tf.squeeze(this.predict(observation), [0]);
                 const action = this.chooseMostLikelyResponse(pred);
                 return action;
             });
@@ -326,7 +341,7 @@ export class PPO {
         }
         else {
             const action = tf.tidy(() => {
-                const pred = tf.squeeze(this.predict(observation, true), [0]);
+                const pred = tf.squeeze(this.predict(observation), [0]);
                 const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1, this.randomSeed), [0]);
                 const action = actions.dataSync()[0];
                 return action;

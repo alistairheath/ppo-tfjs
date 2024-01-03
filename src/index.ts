@@ -410,7 +410,7 @@ export class PPO {
         }
     }
     
-    predict(observation: tf.Tensor | number[], deterministic: boolean = false): tf.Tensor {
+    predict(observation: tf.Tensor | number[]): tf.Tensor {
         if (observation instanceof Array) {
             observation = tf.tensor2d(observation, [1,observation.length]);
         }
@@ -432,19 +432,20 @@ export class PPO {
         const indexOfMax = tf.argMax(normalizedProbabilities).dataSync()[0];
       
         return indexOfMax;
-      }
+    }
 
+    
     predictAction(observation: tf.Tensor | number[], deterministic: boolean = false): number {
         if (deterministic) {
             const action = tf.tidy(() => {
-                const pred = tf.squeeze(this.predict(observation, true), [0]);
+                const pred = tf.squeeze(this.predict(observation), [0]);
                 const action = this.chooseMostLikelyResponse(pred);
                 return action;
             });
             return action
         } else {
             const action = tf.tidy(() => {
-                const pred = tf.squeeze(this.predict(observation, true), [0]);
+                const pred = tf.squeeze(this.predict(observation), [0]);
                 const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1, this.randomSeed), [0]);
                 const action = actions.dataSync()[0];
                 return action;
@@ -452,7 +453,24 @@ export class PPO {
             return action
         }
     }
+    
+    predictProbabilities(observation: tf.Tensor | number[]): number[] {
+        const probsArray = tf.tidy(() => {
+            const logProbabilities = tf.squeeze(this.predict(observation), [0]);
+            if (logProbabilities instanceof tf.Tensor) {
+              return logProbabilities.dataSync();
+            } else {
+              return logProbabilities as number[];
+            }
+          });
 
+          const probabilities = tf.exp(probsArray);
+          const sum = tf.sum(probabilities);
+          const normalizedProbabilities = probabilities.div(sum);
+
+        return normalizedProbabilities.arraySync() as number[]
+    }
+    
     trainPolicy(
         observationBufferT: tf.Tensor, 
         actionBufferT: tf.Tensor, 

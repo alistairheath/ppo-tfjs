@@ -105,7 +105,7 @@ const continuous_test = async () => {
             }
         }
     });
-    const pred = ppo.predictAction(env.reset(), true);
+    const pred = ppo.predictProbabilities(env.reset());
     console.log(`Predicted action: ${pred}`);
 };
 
