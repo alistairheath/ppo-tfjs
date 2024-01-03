@@ -319,7 +319,6 @@ export class PPO {
         if (deterministic) {
             const action = tf.tidy(() => {
                 const pred = tf.squeeze(this.predict(observation, true), [0]);
-                //const actions = pred.argMax();
                 const action = this.chooseMostLikelyResponse(pred);
                 return action;
             });
