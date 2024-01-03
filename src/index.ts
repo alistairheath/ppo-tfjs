@@ -418,14 +418,40 @@ export class PPO {
         return this.actor.predict(observation) as tf.Tensor;
     }
 
-    predictAction(observation: tf.Tensor | number[], deterministic: boolean = false): number {
-        const action = tf.tidy(() => {
-            const pred = tf.squeeze(this.predict(observation, true), [0]);
-            const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1, this.randomSeed), [0]);
-            const action = actions.dataSync()[0];
-            return action;
+    chooseMostLikelyResponse<T extends number[] | tf.Tensor>(logProbabilities: T): number {
+        const probsArray = tf.tidy(() => {
+          if (logProbabilities instanceof tf.Tensor) {
+            return logProbabilities.dataSync();
+          } else {
+            return logProbabilities as number[];
+          }
         });
-        return action
+        const probabilities = tf.exp(probsArray);
+        const sum = tf.sum(probabilities);
+        const normalizedProbabilities = probabilities.div(sum);
+        const indexOfMax = tf.argMax(normalizedProbabilities).dataSync()[0];
+      
+        return indexOfMax;
+      }
+
+    predictAction(observation: tf.Tensor | number[], deterministic: boolean = false): number {
+        if (deterministic) {
+            const action = tf.tidy(() => {
+                const pred = tf.squeeze(this.predict(observation, true), [0]);
+                //const actions = pred.argMax();
+                const action = this.chooseMostLikelyResponse(pred);
+                return action;
+            });
+            return action
+        } else {
+            const action = tf.tidy(() => {
+                const pred = tf.squeeze(this.predict(observation, true), [0]);
+                const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1, this.randomSeed), [0]);
+                const action = actions.dataSync()[0];
+                return action;
+            });
+            return action
+        }
     }
 
     trainPolicy(

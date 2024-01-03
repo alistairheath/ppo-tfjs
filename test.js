@@ -90,6 +90,8 @@ const discrete_test = async () => {
             }
         }
     });
+    const pred = ppo.predictAction(env.reset(), true);
+    console.log(`Predicted action: ${pred}`);
 };
 
 const continuous_test = async () => {
@@ -102,7 +104,9 @@ const continuous_test = async () => {
                 console.log(p.config)
             }
         }
-    })
+    });
+    const pred = ppo.predictAction(env.reset(), true);
+    console.log(`Predicted action: ${pred}`);
 };
 
 await discrete_test().catch((err) => console.log(err)).finally(() => console.log('Discrete Test Complete'));
