@@ -220,6 +220,11 @@ interface PPOConfig {
     verbose?: number;
 }
 
+interface ISavePackageOptions {
+    saveEnvironment?: boolean;
+    saveBuffer?: boolean;
+}
+
 export class PPO {
     config: PPOConfig;
     env: any;
@@ -762,7 +767,7 @@ export class PPO {
         return true
     }
 
-    async savePackage(path: string, callback?: Function) {
+    async savePackage(path: string, config?: ISavePackageOptions, callback?: Function) {
         this._checkPackageSave(path);
         //Save the Actor and Critic Models
         fs.mkdirSync(`${path}/actor`, { recursive: true });
@@ -770,7 +775,12 @@ export class PPO {
         
         //Save the PPO Config & Buffer
         const model_object = this._serialize();
-        model_object['buffer'] = this._serialize(this.buffer); 
+        if (!(config?.saveEnvironment)){
+            delete model_object['env'];
+        }
+        if (!(config?.saveBuffer)){
+            delete model_object['buffer'];
+        }
         const model_json = JSON.stringify(model_object);
 
         const saved_models = Promise.all([

@@ -315,21 +315,6 @@ export class PPO {
         const indexOfMax = tf.argMax(normalizedProbabilities).dataSync()[0];
         return indexOfMax;
     }
-    predictProbabilities(observation) {
-        const probsArray = tf.tidy(() => {
-            const logProbabilities = tf.squeeze(this.predict(observation), [0]);
-            if (logProbabilities instanceof tf.Tensor) {
-                return logProbabilities.dataSync();
-            }
-            else {
-                return logProbabilities;
-            }
-        });
-        const probabilities = tf.exp(probsArray);
-        const sum = tf.sum(probabilities);
-        const normalizedProbabilities = probabilities.div(sum);
-        return normalizedProbabilities.arraySync();
-    }
     predictAction(observation, deterministic = false) {
         if (deterministic) {
             const action = tf.tidy(() => {
@@ -348,6 +333,21 @@ export class PPO {
             });
             return action;
         }
+    }
+    predictProbabilities(observation) {
+        const probsArray = tf.tidy(() => {
+            const logProbabilities = tf.squeeze(this.predict(observation), [0]);
+            if (logProbabilities instanceof tf.Tensor) {
+                return logProbabilities.dataSync();
+            }
+            else {
+                return logProbabilities;
+            }
+        });
+        const probabilities = tf.exp(probsArray);
+        const sum = tf.sum(probabilities);
+        const normalizedProbabilities = probabilities.div(sum);
+        return normalizedProbabilities.arraySync();
     }
     trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT) {
         const clipRatio = this.config.clipRatio ?? 0.2; // Provide a default value if undefined
@@ -552,14 +552,19 @@ export class PPO {
         }
         return true;
     }
-    async savePackage(path, callback) {
+    async savePackage(path, config, callback) {
         this._checkPackageSave(path);
         //Save the Actor and Critic Models
         fs.mkdirSync(`${path}/actor`, { recursive: true });
         fs.mkdirSync(`${path}/critic`, { recursive: true });
         //Save the PPO Config & Buffer
         const model_object = this._serialize();
-        model_object['buffer'] = this._serialize(this.buffer);
+        if (!(config?.saveEnvironment)) {
+            delete model_object['env'];
+        }
+        if (!(config?.saveBuffer)) {
+            delete model_object['buffer'];
+        }
         const model_json = JSON.stringify(model_object);
         const saved_models = Promise.all([
             fs.writeFile(`${path}/model.json`, model_json, 'utf-8', () => { }),
