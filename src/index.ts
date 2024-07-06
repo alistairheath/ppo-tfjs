@@ -11,6 +11,10 @@ interface LearnConfig {
     callback: any
 }
 
+interface loadModelOpts {
+    disposeVariables?: boolean;
+}
+
 type CallbackObject = {
     onRolloutEnd: (p: PPO) => void;
     onRolloutStart: (p: PPO) => void;
@@ -796,8 +800,11 @@ export class PPO {
         }
     }
 
-    async loadPackage(path: string, callback?: Function) {
+    async loadPackage(path: string, callback?: Function, args?: loadModelOpts) {
         this._checkPackageSave(path);
+        if (args?.disposeVariables){
+            tf.disposeVariables();
+        }
 
         //Load the Actor and Critic Models
         const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');

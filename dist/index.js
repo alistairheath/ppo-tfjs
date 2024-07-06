@@ -578,8 +578,11 @@ export class PPO {
             await saved_models.catch((err) => { throw new Error(err); });
         }
     }
-    async loadPackage(path, callback) {
+    async loadPackage(path, callback, args) {
         this._checkPackageSave(path);
+        if (args?.disposeVariables) {
+            tf.disposeVariables();
+        }
         //Load the Actor and Critic Models
         const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');
         const model_object = JSON.parse(model_json);
