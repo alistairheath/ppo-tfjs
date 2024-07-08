@@ -213,8 +213,16 @@ export class PPO {
         this.optValue = tf.train.adam(this.config.valueLearningRate);
     }
     createActor() {
-        const input = tf.layers.input({ shape: this.env.observationSpace.shape });
-        let l = input;
+        let l;
+        let input;
+        if (typeof this.config.netArch?.pi[0] === 'object' && this.config.netArch?.pi[0].kind == 'lstm') {
+            input = tf.layers.input({ shape: [null, this.env.observationSpace.shape[0]] });
+            l = input;
+        }
+        else {
+            input = tf.layers.input({ shape: this.env.observationSpace.shape });
+            l = input;
+        }
         this.config.netArch?.pi.forEach((units) => {
             if (typeof units === 'object') {
                 if (units.kind === 'dense') {
@@ -255,8 +263,16 @@ export class PPO {
         return tf.model({ inputs: input, outputs: l });
     }
     createCritic() {
-        const input = tf.layers.input({ shape: this.env.observationSpace.shape });
-        let l = input;
+        let l;
+        let input;
+        if (typeof this.config.netArch?.vf[0] === 'object' && this.config.netArch?.vf[0].kind == 'lstm') {
+            input = tf.layers.input({ shape: [null, this.env.observationSpace.shape[0]] });
+            l = input;
+        }
+        else {
+            input = tf.layers.input({ shape: this.env.observationSpace.shape });
+            l = input;
+        }
         this.config.netArch?.vf.forEach((units) => {
             if (typeof units === 'object') {
                 if (units.kind === 'dense') {

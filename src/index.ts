@@ -311,8 +311,15 @@ export class PPO {
     }
 
     createActor(): tf.LayersModel {
-        const input = tf.layers.input({ shape: this.env.observationSpace.shape });
-        let l: tf.SymbolicTensor = input;
+        let l: tf.SymbolicTensor;
+        let input: tf.SymbolicTensor;
+        if (typeof this.config.netArch?.pi![0] === 'object' && this.config.netArch?.pi![0].kind == 'lstm'){
+            input = tf.layers.input({ shape: [null, this.env.observationSpace.shape[0]] });
+            l = input;
+        } else {
+            input = tf.layers.input({ shape: this.env.observationSpace.shape });
+            l = input;
+        }
 
         this.config.netArch?.pi!.forEach((units: number | PPOLayer) => {
             if (typeof units === 'object') {
@@ -351,8 +358,15 @@ export class PPO {
     }
 
     createCritic(): tf.LayersModel {
-        const input = tf.layers.input({ shape: this.env.observationSpace.shape });
-        let l: tf.SymbolicTensor = input;
+        let l: tf.SymbolicTensor;
+        let input: tf.SymbolicTensor;
+        if (typeof this.config.netArch?.vf![0] === 'object' && this.config.netArch?.vf![0].kind == 'lstm'){
+            input = tf.layers.input({ shape: [null, this.env.observationSpace.shape[0]] });
+            l = input;
+        } else {
+            input = tf.layers.input({ shape: this.env.observationSpace.shape });
+            l = input;
+        }
 
         this.config.netArch?.vf!.forEach((units: number | PPOLayer) => {
             if (typeof units === 'object') {
