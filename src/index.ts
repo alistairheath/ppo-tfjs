@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
+import type { DenseLayerArgs } from "@tensorflow/tfjs-layers/dist/layers/core";
 import * as fs from 'fs';
 
 function log(...args: any[]) {
@@ -217,12 +218,16 @@ interface PPOConfig {
     targetKL?: number;
     useSDE?: boolean;
     netArch?: {
-        pi?: number[];
-        vf?: number[];
+        pi?: (number|PPOLayer)[];
+        vf?: (number|PPOLayer)[];
     };
-    activation?: any;
     verbose?: number;
 }
+
+interface PPOLayer {
+    kind: string;
+    args: DenseLayerArgs | tf.LSTMLayerArgs;
+};
 
 interface ISavePackageOptions {
     saveEnvironment?: boolean;
@@ -256,7 +261,6 @@ export class PPO {
                 'pi': [32, 32],
                 'vf': [32, 32]
             },
-            activation: 'relu',
             verbose: 0
         };
 
@@ -310,11 +314,23 @@ export class PPO {
         const input = tf.layers.input({ shape: this.env.observationSpace.shape });
         let l: tf.SymbolicTensor = input;
 
-        this.config.netArch?.pi!.forEach((units: number) => {
-            l = tf.layers.dense({
-                units,
-                activation: this.config.activation || 'relu'
-            }).apply(l) as tf.SymbolicTensor;
+        this.config.netArch?.pi!.forEach((units: number | PPOLayer) => {
+            if (typeof units === 'object') {
+                if (units.kind === 'dense') {
+                    l = tf.layers.dense(units.args).apply(l) as tf.SymbolicTensor;
+                } else if (units.kind === 'lstm') {
+                    l = tf.layers.lstm(units.args).apply(l) as tf.SymbolicTensor;
+                } else {
+                    throw new Error('[ERROR] Unknown layer kind: ' + units.kind);
+                }
+            } else if (typeof units === 'number') {
+                l = tf.layers.dense({
+                    units: units,
+                    activation: 'relu'
+                }).apply(l) as tf.SymbolicTensor;
+            } else {
+                throw new Error('[ERROR] Unknown layer kind: ' + typeof units);
+            }
         });
 
         if (this.env.actionSpace.class === 'Discrete') {
@@ -338,11 +354,23 @@ export class PPO {
         const input = tf.layers.input({ shape: this.env.observationSpace.shape });
         let l: tf.SymbolicTensor = input;
 
-        this.config.netArch?.vf!.forEach((units: number) => {
-            l = tf.layers.dense({
-                units,
-                activation: this.config.activation || 'relu'
-            }).apply(l) as tf.SymbolicTensor;
+        this.config.netArch?.vf!.forEach((units: number | PPOLayer) => {
+            if (typeof units === 'object') {
+                if (units.kind === 'dense') {
+                    l = tf.layers.dense(units.args).apply(l) as tf.SymbolicTensor;
+                } else if (units.kind === 'lstm') {
+                    l = tf.layers.lstm(units.args).apply(l) as tf.SymbolicTensor;
+                } else {
+                    throw new Error('[ERROR] Unknown layer kind: ' + units.kind);
+                }
+            } else if (typeof units === 'number') {
+                l = tf.layers.dense({
+                    units: units,
+                    activation: 'relu'
+                }).apply(l) as tf.SymbolicTensor;
+            } else {
+                throw new Error('[ERROR] Unknown layer kind: ' + typeof units);
+            }
         });
 
         l = tf.layers.dense({
