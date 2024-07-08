@@ -314,7 +314,7 @@ export class PPO {
         let l: tf.SymbolicTensor;
         let input: tf.SymbolicTensor;
         if (typeof this.config.netArch?.pi![0] === 'object' && this.config.netArch?.pi![0].kind == 'lstm'){
-            input = tf.layers.input({ shape: [null, this.env.observationSpace.shape[0]] });
+            input = tf.layers.input({ shape: [this.env.observationSpace.shape[0], null] });
             l = input;
         } else {
             input = tf.layers.input({ shape: this.env.observationSpace.shape });
@@ -361,7 +361,7 @@ export class PPO {
         let l: tf.SymbolicTensor;
         let input: tf.SymbolicTensor;
         if (typeof this.config.netArch?.vf![0] === 'object' && this.config.netArch?.vf![0].kind == 'lstm'){
-            input = tf.layers.input({ shape: [null, this.env.observationSpace.shape[0]] });
+            input = tf.layers.input({ shape: [this.env.observationSpace.shape[0], null] });
             l = input;
         } else {
             input = tf.layers.input({ shape: this.env.observationSpace.shape });
