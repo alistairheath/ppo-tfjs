@@ -156,6 +156,7 @@ class Buffer {
         this.pointer = 0;
     }
 }
+;
 export class PPO {
     constructor(env, config) {
         this.randomSeed = 0;
@@ -171,7 +172,6 @@ export class PPO {
                 'pi': [32, 32],
                 'vf': [32, 32]
             },
-            activation: 'relu',
             verbose: 0
         };
         this.config = Object.assign({}, configDefault, config);
@@ -216,10 +216,26 @@ export class PPO {
         const input = tf.layers.input({ shape: this.env.observationSpace.shape });
         let l = input;
         this.config.netArch?.pi.forEach((units) => {
-            l = tf.layers.dense({
-                units,
-                activation: this.config.activation || 'relu'
-            }).apply(l);
+            if (typeof units === 'object') {
+                if (units.kind === 'dense') {
+                    l = tf.layers.dense(units.args).apply(l);
+                }
+                else if (units.kind === 'lstm') {
+                    l = tf.layers.lstm(units.args).apply(l);
+                }
+                else {
+                    throw new Error('[ERROR] Unknown layer kind: ' + units.kind);
+                }
+            }
+            else if (typeof units === 'number') {
+                l = tf.layers.dense({
+                    units: units,
+                    activation: 'relu'
+                }).apply(l);
+            }
+            else {
+                throw new Error('[ERROR] Unknown layer kind: ' + typeof units);
+            }
         });
         if (this.env.actionSpace.class === 'Discrete') {
             l = tf.layers.dense({
@@ -242,10 +258,26 @@ export class PPO {
         const input = tf.layers.input({ shape: this.env.observationSpace.shape });
         let l = input;
         this.config.netArch?.vf.forEach((units) => {
-            l = tf.layers.dense({
-                units,
-                activation: this.config.activation || 'relu'
-            }).apply(l);
+            if (typeof units === 'object') {
+                if (units.kind === 'dense') {
+                    l = tf.layers.dense(units.args).apply(l);
+                }
+                else if (units.kind === 'lstm') {
+                    l = tf.layers.lstm(units.args).apply(l);
+                }
+                else {
+                    throw new Error('[ERROR] Unknown layer kind: ' + units.kind);
+                }
+            }
+            else if (typeof units === 'number') {
+                l = tf.layers.dense({
+                    units: units,
+                    activation: 'relu'
+                }).apply(l);
+            }
+            else {
+                throw new Error('[ERROR] Unknown layer kind: ' + typeof units);
+            }
         });
         l = tf.layers.dense({
             units: 1,
