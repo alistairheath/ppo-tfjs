@@ -1,4 +1,5 @@
 import * as tf from '@tensorflow/tfjs';
+import * as fs from 'fs';
 function log(...args) {
     console.log('[PPO]', ...args);
 }
@@ -6,25 +7,25 @@ class BaseCallback {
     constructor() {
         this.nCalls = 0;
     }
-    _onStep(alg) { return true; }
-    onStep(alg) {
+    async _onStep(alg) { return true; }
+    async onStep(alg) {
         this.nCalls += 1;
         return this._onStep(alg);
     }
-    _onTrainingStart(alg) { }
-    onTrainingStart(alg) {
+    async _onTrainingStart(alg) { }
+    async onTrainingStart(alg) {
         this._onTrainingStart(alg);
     }
-    _onTrainingEnd(alg) { }
-    onTrainingEnd(alg) {
+    async _onTrainingEnd(alg) { }
+    async onTrainingEnd(alg) {
         this._onTrainingEnd(alg);
     }
-    _onRolloutStart(alg) { }
-    onRolloutStart(alg) {
+    async _onRolloutStart(alg) { }
+    async onRolloutStart(alg) {
         this._onRolloutStart(alg);
     }
-    _onRolloutEnd(alg) { }
-    onRolloutEnd(alg) {
+    async _onRolloutEnd(alg) { }
+    async onRolloutEnd(alg) {
         this._onRolloutEnd(alg);
     }
 }
@@ -33,7 +34,7 @@ class FunctionalCallback extends BaseCallback {
         super();
         this.callback = callback;
     }
-    _onStep(alg) {
+    async _onStep(alg) {
         if (this.callback) {
             return this.callback(alg);
         }
@@ -45,28 +46,28 @@ class DictCallback extends BaseCallback {
         super();
         this.callback = callback;
     }
-    _onStep(alg) {
+    async _onStep(alg) {
         if (this.callback && this.callback.onStep) {
             return this.callback.onStep(alg);
         }
         return true;
     }
-    _onTrainingStart(alg) {
+    async _onTrainingStart(alg) {
         if (this.callback && this.callback.onTrainingStart) {
             this.callback.onTrainingStart(alg);
         }
     }
-    _onTrainingEnd(alg) {
+    async _onTrainingEnd(alg) {
         if (this.callback && this.callback.onTrainingEnd) {
             this.callback.onTrainingEnd(alg);
         }
     }
-    _onRolloutStart(alg) {
+    async _onRolloutStart(alg) {
         if (this.callback && this.callback.onRolloutStart) {
             this.callback.onRolloutStart(alg);
         }
     }
-    _onRolloutEnd(alg) {
+    async _onRolloutEnd(alg) {
         if (this.callback && this.callback.onRolloutEnd) {
             this.callback.onRolloutEnd(alg);
         }
@@ -157,6 +158,7 @@ class Buffer {
 }
 export class PPO {
     constructor(env, config) {
+        this.randomSeed = 0;
         const configDefault = {
             nSteps: 512,
             nEpochs: 10,
@@ -256,10 +258,10 @@ export class PPO {
             const preds = tf.squeeze(this.actor.predict(observationT), [0]);
             let action;
             if (this.env.actionSpace.class === 'Discrete') {
-                action = tf.squeeze(tf.multinomial(preds, 1), [0]); // For discrete action space
+                action = tf.squeeze(tf.multinomial(preds, 1, this.randomSeed), [0]); // For discrete action space
             }
             else if (this.env.actionSpace.class === 'Box') {
-                action = tf.add(tf.mul(tf.randomStandardNormal([this.env.actionSpace.shape[0]]), tf.exp(this.logStd)), preds); // For continuous action space
+                action = tf.add(tf.mul(tf.randomStandardNormal([this.env.actionSpace.shape[0]], 'float32', this.randomSeed), tf.exp(this.logStd)), preds); // For continuous action space
             }
             else {
                 throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
@@ -292,8 +294,60 @@ export class PPO {
             throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
         }
     }
-    predict(observation, deterministic = false) {
+    predict(observation) {
+        if (observation instanceof Array) {
+            observation = tf.tensor2d(observation, [1, observation.length]);
+        }
         return this.actor.predict(observation);
+    }
+    chooseMostLikelyResponse(logProbabilities) {
+        const probsArray = tf.tidy(() => {
+            if (logProbabilities instanceof tf.Tensor) {
+                return logProbabilities.dataSync();
+            }
+            else {
+                return logProbabilities;
+            }
+        });
+        const probabilities = tf.exp(probsArray);
+        const sum = tf.sum(probabilities);
+        const normalizedProbabilities = probabilities.div(sum);
+        const indexOfMax = tf.argMax(normalizedProbabilities).dataSync()[0];
+        return indexOfMax;
+    }
+    predictAction(observation, deterministic = false) {
+        if (deterministic) {
+            const action = tf.tidy(() => {
+                const pred = tf.squeeze(this.predict(observation), [0]);
+                const action = this.chooseMostLikelyResponse(pred);
+                return action;
+            });
+            return action;
+        }
+        else {
+            const action = tf.tidy(() => {
+                const pred = tf.squeeze(this.predict(observation), [0]);
+                const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1, this.randomSeed), [0]);
+                const action = actions.dataSync()[0];
+                return action;
+            });
+            return action;
+        }
+    }
+    predictProbabilities(observation) {
+        const probsArray = tf.tidy(() => {
+            const logProbabilities = tf.squeeze(this.predict(observation), [0]);
+            if (logProbabilities instanceof tf.Tensor) {
+                return logProbabilities.dataSync();
+            }
+            else {
+                return logProbabilities;
+            }
+        });
+        const probabilities = tf.exp(probsArray);
+        const sum = tf.sum(probabilities);
+        const normalizedProbabilities = probabilities.div(sum);
+        return normalizedProbabilities.arraySync();
     }
     trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT) {
         const clipRatio = this.config.clipRatio ?? 0.2; // Provide a default value if undefined
@@ -340,7 +394,7 @@ export class PPO {
             this.lastObservation = await this.env.reset();
         }
         this.buffer.reset();
-        callback.onRolloutStart(this);
+        await callback.onRolloutStart(this);
         let sumReturn = 0;
         let sumLength = 0;
         let numEpisodes = 0;
@@ -350,8 +404,7 @@ export class PPO {
                 const lastObservationT = tf.tensor([this.lastObservation]);
                 const [predsT, actionT] = this.sampleAction(lastObservationT);
                 const valueT = this.critic.predict(lastObservationT);
-                const logprobabilityT = this.logProb(predsT, actionT);
-                const logprobabilityNum = Array.isArray(logprobabilityT) ? logprobabilityT[0] : logprobabilityT;
+                const logprobabilityNum = this.logProb(predsT, actionT).dataSync()[0];
                 const valueT_data = valueT.arraySync();
                 return [
                     predsT.arraySync(),
@@ -366,19 +419,22 @@ export class PPO {
             sumLength += 1;
             // Update global timestep counter
             this.numTimesteps += 1;
-            callback.onStep(this);
+            await callback.onStep({ ppo: this, action, reward, done });
             this.buffer.add(this.lastObservation, action, reward, value, logprobability);
             this.lastObservation = newObservation;
             if (done || step === this.config.nSteps - 1) {
                 const lastValue = done
                     ? 0
-                    : tf.tidy(() => this.critic.predict(tf.tensor([newObservation])).arraySync())[0][0];
+                    : tf.tidy(() => {
+                        const prediction = this.critic.predict(tf.tensor([newObservation]));
+                        return prediction.arraySync()[0][0];
+                    });
                 this.buffer.finishTrajectory(lastValue);
                 numEpisodes += 1;
                 this.lastObservation = await this.env.reset();
             }
         }
-        callback.onRolloutEnd(this);
+        await callback.onRolloutEnd(this);
     }
     async train() {
         // Get values from the buffer
@@ -417,7 +473,7 @@ export class PPO {
         let { totalTimesteps, logInterval, callback } = { ...learnConfigDefault, ...learnConfig };
         callback = this._initCallback(callback);
         let iteration = 0;
-        callback.onTrainingStart(this);
+        await callback.onTrainingStart(this);
         while (this.numTimesteps < totalTimesteps) {
             await this.collectRollouts(callback);
             iteration += 1;
@@ -426,6 +482,128 @@ export class PPO {
             }
             await this.train();
         }
-        callback.onTrainingEnd(this);
+        await callback.onTrainingEnd(this);
     }
+    _serialize(object = this) {
+        const attributes = {};
+        for (const key in object) {
+            if (object.hasOwnProperty(key) && typeof object[key] !== 'function' && !(object[key] instanceof tf.LayersModel)) {
+                attributes[key] = object[key];
+            }
+        }
+        return attributes;
+    }
+    _deserialize(data, object = this) {
+        for (const key in data) {
+            if (data.hasOwnProperty(key) && object.hasOwnProperty(key)) {
+                object[key] = data[key];
+            }
+        }
+    }
+    async _convertModelWeightsToJSON(model) {
+        const weights = model.getWeights();
+        const weightData = weights.map(w => w.arraySync());
+        return weightData;
+    }
+    async toJSON() {
+        //Get PPO Attributes
+        const model_object = this._serialize();
+        model_object['buffer'] = this._serialize(this.buffer);
+        const [actor_w, critic_w] = await Promise.all([
+            this._convertModelWeightsToJSON(this.actor),
+            this._convertModelWeightsToJSON(this.critic)
+        ]);
+        model_object['actor'] = {
+            'architecture': this.actor.toJSON(null, false),
+            'weights': actor_w
+        };
+        model_object['critic'] = {
+            'architecture': this.critic.toJSON(null, false),
+            'weights': critic_w
+        };
+        const model_json = JSON.stringify(model_object);
+        return model_json;
+    }
+    async fromJSON(jsonString) {
+        const modelObject = JSON.parse(jsonString);
+        // Rebuild the PPO Config & Buffer
+        this.config = modelObject.config;
+        this._deserialize(modelObject.buffer, this.buffer);
+        // Rebuild the actor and critic models
+        this.actor = await this._rebuildModelFromJSON(modelObject.actor);
+        this.critic = await this._rebuildModelFromJSON(modelObject.critic);
+    }
+    async _rebuildModelFromJSON(modelData) {
+        // Create a model from the architecture
+        const model = await tf.loadLayersModel(tf.io.fromMemory(modelData.architecture));
+        // Restore the weights
+        const weights = modelData.weights.map((w) => tf.tensor(w));
+        model.setWeights(weights);
+        return model;
+    }
+    _checkPackageSave(path) {
+        //Check if Running in Node - and Throw an Error If Not
+        if (typeof window !== 'undefined') {
+            throw new Error('This method only works in node');
+        }
+        //Check if Path Exists - and Throw an Error If Not
+        if (!fs.existsSync(path)) {
+            throw new Error('Path does not exist');
+        }
+        return true;
+    }
+    async savePackage(path, config, callback) {
+        this._checkPackageSave(path);
+        //Save the Actor and Critic Models
+        fs.mkdirSync(`${path}/actor`, { recursive: true });
+        fs.mkdirSync(`${path}/critic`, { recursive: true });
+        //Save the PPO Config & Buffer
+        const model_object = this._serialize();
+        if (!(config?.saveEnvironment)) {
+            delete model_object['env'];
+        }
+        if (!(config?.saveBuffer)) {
+            delete model_object['buffer'];
+        }
+        const model_json = JSON.stringify(model_object);
+        const saved_models = Promise.all([
+            fs.writeFile(`${path}/model.json`, model_json, 'utf-8', () => { }),
+            this.actor.save(`file://${path}/actor`),
+            this.critic.save(`file://${path}/critic`),
+        ]);
+        if (callback) {
+            await saved_models.catch((err) => { throw new Error(err); }).finally(() => callback());
+        }
+        else {
+            await saved_models.catch((err) => { throw new Error(err); });
+        }
+    }
+    async loadPackage(path, callback, args) {
+        this._checkPackageSave(path);
+        if (args?.disposeVariables) {
+            tf.disposeVariables();
+        }
+        //Load the Actor and Critic Models
+        const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');
+        const model_object = JSON.parse(model_json);
+        const [actor, critic] = await Promise.all([
+            tf.loadLayersModel(`file://${path}/actor/model.json`),
+            tf.loadLayersModel(`file://${path}/critic/model.json`),
+        ]);
+        // Rebuild the PPO Config & Buffer
+        this.config = model_object.config;
+        this._deserialize(model_object.buffer, this.buffer);
+        // Rebuild the actor and critic models
+        this.actor = actor;
+        this.critic = critic;
+        if (callback) {
+            callback();
+        }
+    }
+    setRandomSeed(seed) {
+        this.randomSeed = seed;
+    }
+}
+if (typeof module === 'object' && module.exports) {
+    module.exports = PPO;
 }
