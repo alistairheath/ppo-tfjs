@@ -637,14 +637,21 @@ export class PPO {
             advantageBufferT,
             returnBufferT,
             logprobabilityBufferT
-        ] = tf.tidy(() => [
-                tf.tensor(observationBuffer),
-                tf.tensor(actionBuffer, actionBufferShape),
-                tf.tensor(advantageBuffer),
-                tf.tensor(returnBuffer).reshape([-1, 1]),
-                tf.tensor(logprobabilityBuffer)
-            ]
-        );
+        ] = tf.tidy(() => {
+            const observationBufferT = tf.tensor(observationBuffer);
+            const actionBufferT = tf.tensor(actionBuffer, actionBufferShape);
+            const advantageBufferT = tf.tensor(advantageBuffer);
+            const returnBufferT = tf.tensor(returnBuffer).reshape([-1, 1]);
+            const logprobabilityBufferT = tf.tensor(logprobabilityBuffer);
+
+            return [
+                observationBufferT,
+                actionBufferT,
+                advantageBufferT,
+                returnBufferT,
+                logprobabilityBufferT
+            ];
+        });
     
         for (let i = 0; i < this.config.nEpochs!; i++) {
             const kl = this.trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT);
@@ -657,13 +664,12 @@ export class PPO {
             this.trainValue(observationBufferT, returnBufferT);
         }
     
-        tf.dispose([
-            observationBufferT, 
-            actionBufferT,
-            advantageBufferT,
-            returnBufferT,
-            logprobabilityBufferT
-        ]);
+        // Ensure tensors are disposed after use
+        observationBufferT.dispose();
+        actionBufferT.dispose();
+        advantageBufferT.dispose();
+        returnBufferT.dispose();
+        logprobabilityBufferT.dispose();
     }
 
     async learn(learnConfig: LearnConfig) {
