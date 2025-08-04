@@ -558,19 +558,26 @@ export class PPO {
         for (let step = 0; step < this.config.nSteps!; step++) {
             // Predict action, value, and logprobability from last observation
                 const [preds, action, value, logprobability] = tf.tidy(() => {
-                const lastObservationT = tf.tensor([this.lastObservation]);
-                const [predsT, actionT] = this.sampleAction(lastObservationT);
-                const valueT = this.critic.predict(lastObservationT) as tf.Tensor;
-                const logprobabilityNum: number = (this.logProb(predsT, actionT) as tf.Tensor1D).dataSync()[0];
-                const valueT_data: any = valueT.arraySync();
+                    const lastObservationT = tf.tensor([this.lastObservation]);
+                    const [predsT, actionT] = this.sampleAction(lastObservationT);
+                    const valueT = this.critic.predict(lastObservationT) as tf.Tensor;
+                    const logProbTensor: tf.Tensor1D = this.logProb(predsT, actionT) as tf.Tensor1D;
 
-                return [
-                    predsT.arraySync(),
-                    actionT.arraySync(),
-                    valueT_data,
-                    logprobabilityNum
-                ];
-            });
+                    const output: any[] = [
+                        predsT.arraySync(),
+                        actionT.arraySync(),
+                        valueT.arraySync(),
+                        logProbTensor.dataSync()[0],
+                    ];
+
+                    lastObservationT.dispose();
+                    predsT.dispose();
+                    actionT.dispose();
+                    valueT.dispose();
+                    logProbTensor.dispose();
+
+                    return output;
+                });
     
             // Take action in environment
             const [newObservation, reward, done] = await this.env.step(action);
@@ -596,8 +603,12 @@ export class PPO {
                 const lastValue = done 
                     ? 0 
                     : tf.tidy(() => {
-                        const prediction = this.critic.predict(tf.tensor([newObservation])) as tf.Tensor2D;
-                        return prediction.arraySync()[0][0] as number;
+                        const newObservationT = tf.tensor([newObservation]);
+                        const prediction = this.critic.predict(newObservationT) as tf.Tensor2D;
+                        const result = prediction.arraySync()[0][0] as number;
+                        newObservationT.dispose();
+                        prediction.dispose();
+                        return result;
                     });
                 this.buffer.finishTrajectory(lastValue);
                 numEpisodes += 1;
