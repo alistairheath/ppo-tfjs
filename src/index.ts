@@ -1,227 +1,136 @@
 import * as tf from '@tensorflow/tfjs';
 import * as fs from 'fs';
 
-function log(...args: any[]) {
-    console.log('[PPO]', ...args);
+/** ----------------------------
+ * Callback interfaces
+ * -----------------------------*/
+export interface CallbackObject {
+  onTrainingStart?: (ctx: PPO) => Promise<void> | void;
+  onTrainingEnd?: (ctx: PPO) => Promise<void> | void;
+  onRolloutStart?: (ctx: PPO) => Promise<void> | void;
+  onRolloutEnd?: (ctx: PPO) => Promise<void> | void;
+  onStep?: (info: { ppo: PPO; action: number; reward: number; done: boolean }) => Promise<void> | void;
 }
 
-interface LearnConfig {
-    totalTimesteps?: number;
-    logInterval?: number;
-    callback: any
+export class BaseCallback {
+  async onTrainingStart(_ctx: PPO) { }
+  async onTrainingEnd(_ctx: PPO) { }
+  async onRolloutStart(_ctx: PPO) { }
+  async onRolloutEnd(_ctx: PPO) { }
+  async onStep(_info: { ppo: PPO; action: number; reward: number; done: boolean }) { }
 }
 
-interface loadModelOpts {
-    disposeVariables?: boolean;
+export class DictCallback extends BaseCallback {
+  dict: CallbackObject;
+  constructor(dict: CallbackObject) {
+    super();
+    this.dict = dict;
+  }
+  async onTrainingStart(ctx: PPO) { if (this.dict.onTrainingStart) await this.dict.onTrainingStart(ctx); }
+  async onTrainingEnd(ctx: PPO) { if (this.dict.onTrainingEnd) await this.dict.onTrainingEnd(ctx); }
+  async onRolloutStart(ctx: PPO) { if (this.dict.onRolloutStart) await this.dict.onRolloutStart(ctx); }
+  async onRolloutEnd(ctx: PPO) { if (this.dict.onRolloutEnd) await this.dict.onRolloutEnd(ctx); }
+  async onStep(info: { ppo: PPO; action: number; reward: number; done: boolean }) {
+    if (this.dict.onStep) await this.dict.onStep(info);
+  }
 }
 
-type CallbackObject = {
-    onRolloutEnd: (p: PPO) => void;
-    onRolloutStart: (p: PPO) => void;
-    onTrainingEnd: (p: PPO) => void;
-    onTrainingStart: (p: PPO) => void;
-    onStep: (p: PPO) => boolean;
-}
-
-class BaseCallback {
-    nCalls: number;
-    constructor() {
-        this.nCalls = 0
-    }
-
-    async _onStep(alg: any) { return true }
-    async onStep(alg: any) {
-        this.nCalls += 1
-        return this._onStep(alg)
-    }
-
-    async _onTrainingStart(alg: any) {}
-    async onTrainingStart(alg: any) {
-        this._onTrainingStart(alg)
-    }
-
-    async _onTrainingEnd(alg: any) {}
-    async onTrainingEnd(alg: any) {
-        this._onTrainingEnd(alg)
-    }
-
-    async _onRolloutStart(alg: any) {}
-    async onRolloutStart(alg: any) {
-        this._onRolloutStart(alg)
-    }
-
-    async _onRolloutEnd(alg: any) {}
-    async onRolloutEnd(alg: any) {
-        this._onRolloutEnd(alg)
-    }
-}
-
-class FunctionalCallback extends BaseCallback {
-    callback: any;
-    constructor(callback: any) {
-        super()
-        this.callback = callback
-    }
-
-    override async _onStep(alg: this) {
-        if (this.callback) {
-            return this.callback(alg)
-        }
-        return true
-    }
-}
-
-class DictCallback extends BaseCallback {
-    callback: CallbackObject;
-    constructor(callback: CallbackObject) {
-        super()
-        this.callback = callback
-    }
-
-    override async _onStep(alg: any) {
-        if (this.callback && this.callback.onStep) {
-            return this.callback.onStep(alg)
-        }
-        return true
-    }
-    
-    override async _onTrainingStart(alg: any) {
-        if (this.callback && this.callback.onTrainingStart) {
-            this.callback.onTrainingStart(alg)
-        }
-    }
-
-    override async _onTrainingEnd(alg: any) {
-        if (this.callback && this.callback.onTrainingEnd) {
-            this.callback.onTrainingEnd(alg)
-        }
-    }
-
-    override async _onRolloutStart(alg: any) {
-        if (this.callback && this.callback.onRolloutStart) {
-            this.callback.onRolloutStart(alg)
-        }
-    }
-
-    override async _onRolloutEnd(alg: any) {
-        if (this.callback && this.callback.onRolloutEnd) {
-            this.callback.onRolloutEnd(alg)
-        }
-    }
-}
-
+/** ----------------------------
+ * Buffer (GAE-Lambda)
+ * -----------------------------*/
 class Buffer {
-    bufferConfig: {
-        gamma: number;
-        lam: number;
-    };
-    gamma: number;
-    lam: number;
-    observationBuffer: any[] = [];
-    actionBuffer: any[]  = []; 
-    rewardBuffer: number[]  = [];
-    valueBuffer: number[]  = [];
-    logprobabilityBuffer: number[]  = [];
-    advantageBuffer: number[]  = [];
-    returnBuffer: number[]  = [];
-    trajectoryStartIndex: number = 0;
-    pointer: number = 0;
+  gamma: number;
+  lam: number;
+  observationBuffer: number[][] = [];
+  actionBuffer: number[] = [];
+  rewardBuffer: number[] = [];
+  valueBuffer: number[] = [];
+  logprobabilityBuffer: number[] = [];
+  advantageBuffer: number[] = [];
+  returnBuffer: number[] = [];
+  trajectoryStartIndex = 0;
+  pointer = 0;
 
-    constructor(bufferConfig: { gamma?: number; lam?: number; [key: string]: any }) {
-        const bufferConfigDefault = {
-            gamma: 0.99,
-            lam: 0.95
-        };
-        this.bufferConfig = { ...bufferConfigDefault, ...bufferConfig };
-        this.gamma = this.bufferConfig.gamma;
-        this.lam = this.bufferConfig.lam;
-        this.reset();
-    }
+  constructor(cfg: { gamma: number; lam: number }) {
+    this.gamma = cfg.gamma;
+    this.lam = cfg.lam;
+  }
 
-    add(observation: any, action: any, reward: number, value: number, logprobability: number): void {
-        this.observationBuffer.push(observation);
-        this.actionBuffer.push(action);
-        this.rewardBuffer.push(reward);
-        this.valueBuffer.push(value);
-        this.logprobabilityBuffer.push(logprobability);
-        this.pointer += 1;
-    }
+  reset(): void {
+    this.observationBuffer = [];
+    this.actionBuffer = [];
+    this.rewardBuffer = [];
+    this.valueBuffer = [];
+    this.logprobabilityBuffer = [];
+    this.advantageBuffer = [];
+    this.returnBuffer = [];
+    this.trajectoryStartIndex = 0;
+    this.pointer = 0;
+  }
 
-    discountedCumulativeSums(arr: number[], coeff: number): number[] {
-        let res: number[] = [];
-        let s = 0;
-        arr.reverse().forEach(v => {
-            s = v + s * coeff;
-            res.push(s);
-        });
-        return res.reverse();
-    }
+  add(obs: number[], action: number, reward: number, value: number, logp: number) {
+    this.observationBuffer.push(obs);
+    this.actionBuffer.push(action);
+    this.rewardBuffer.push(reward);
+    this.valueBuffer.push(value);
+    this.logprobabilityBuffer.push(logp);
+    this.pointer += 1;
+  }
 
-    finishTrajectory(lastValue: number): void {
-        const rewards = this.rewardBuffer
-            .slice(this.trajectoryStartIndex, this.pointer)
-            .concat(lastValue * this.gamma);
-        const values = this.valueBuffer
-            .slice(this.trajectoryStartIndex, this.pointer)
-            .concat(lastValue);
-        const deltas = rewards
-            .slice(0, -1)
-            .map((reward, ri) => reward - (values[ri] - this.gamma * values[ri + 1]));
-        this.advantageBuffer = this.advantageBuffer
-            .concat(this.discountedCumulativeSums(deltas, this.gamma * this.lam));
-        this.returnBuffer = this.returnBuffer
-            .concat(this.discountedCumulativeSums(rewards, this.gamma).slice(0, -1));
-        this.trajectoryStartIndex = this.pointer;
+  private discountedCumulativeSums(arr: number[], coeff: number): number[] {
+    const res: number[] = [];
+    let s = 0;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      s = arr[i] + coeff * s;
+      res[i] = s;
     }
+    return res;
+  }
 
-    get(): [any[], any[], number[], number[], number[]] {
-        let advantageMean: number, advantageStd: number;
-        [advantageMean, advantageStd] = tf.tidy(() => [
-            tf.mean(this.advantageBuffer).arraySync() as number,
-            tf.moments(this.advantageBuffer).variance.sqrt().arraySync() as number
-        ]);
-        
-        this.advantageBuffer = this.advantageBuffer
-        .map(advantage => {
-            return (advantage - advantageMean) / advantageStd;
-        });
-        
-        return [
-            this.observationBuffer,
-            this.actionBuffer,
-            this.advantageBuffer,
-            this.returnBuffer,
-            this.logprobabilityBuffer
-        ];
-    }
+  finishTrajectory(lastValue: number): void {
+    const rewards = this.rewardBuffer.slice(this.trajectoryStartIndex, this.pointer).concat(lastValue * this.gamma);
+    const values = this.valueBuffer.slice(this.trajectoryStartIndex, this.pointer).concat(lastValue);
+    const deltas = rewards.slice(0, -1).map((r, i) => r + this.gamma * values[i + 1] - values[i]);
+    const advantages = this.discountedCumulativeSums(deltas, this.gamma * this.lam);
+    const returns = this.discountedCumulativeSums(rewards, this.gamma).slice(0, -1);
+    this.advantageBuffer = this.advantageBuffer.concat(advantages);
+    this.returnBuffer = this.returnBuffer.concat(returns);
+    this.trajectoryStartIndex = this.pointer;
+  }
 
-    reset(): void {
-        this.observationBuffer = [];
-        this.actionBuffer = [];
-        this.advantageBuffer = [];
-        this.rewardBuffer = [];
-        this.returnBuffer = [];
-        this.valueBuffer = [];
-        this.logprobabilityBuffer = [];
-        this.trajectoryStartIndex = 0;
-        this.pointer = 0;
-    }
+  get(): [number[][], number[], number[], number[], number[]] {
+    // Normalize advantages with plain JS
+    const adv = this.advantageBuffer;
+    let sum = 0; for (let i = 0; i < adv.length; i++) sum += adv[i];
+    const mean = adv.length ? sum / adv.length : 0;
+    let vsum = 0; for (let i = 0; i < adv.length; i++) { const d = adv[i] - mean; vsum += d * d; }
+    const std = adv.length ? Math.sqrt(vsum / adv.length) || 1 : 1;
+    this.advantageBuffer = adv.map(a => (a - mean) / std);
+    return [this.observationBuffer, this.actionBuffer, this.advantageBuffer, this.returnBuffer, this.logprobabilityBuffer];
+  }
 }
 
-interface PPOConfig {
-    nSteps?: number;
-    nEpochs?: number;
-    policyLearningRate?: number;
-    valueLearningRate?: number;
-    clipRatio?: number;
-    targetKL?: number;
-    useSDE?: boolean;
-    netArch?: {
-        pi?: number[];
-        vf?: number[];
-    };
-    activation?: any;
-    verbose?: number;
+/** ----------------------------
+ * PPO
+ * -----------------------------*/
+
+export interface PPOConfig {
+  nSteps?: number;
+  nEpochs?: number;
+  policyLearningRate?: number;
+  valueLearningRate?: number;
+  clipRatio?: number;
+  targetKL?: number;
+  useSDE?: boolean;
+  netArch?: { pi?: number[]; vf?: number[] } | number[];
+  activation?: any;
+  verbose?: number;
+  /** rollout collection mode */
+  mode?: 'sequential' | 'vectorized';
+  /** number of parallel environments when mode='vectorized' */
+  nEnvs?: number;
+  /** factory to create new env instances for vectorized mode */
+  makeEnv?: () => any | Promise<any>;
 }
 
 interface ISavePackageOptions {
@@ -229,626 +138,502 @@ interface ISavePackageOptions {
     saveBuffer?: boolean;
 }
 
-export class PPO {
-    config: PPOConfig;
-    env: any;
-    numTimesteps: number;
-    lastObservation: any;
-    buffer: Buffer;
-    actor: tf.LayersModel;
-    critic: tf.LayersModel;
-    logStd: any;
-    optPolicy: any;
-    optValue: any;
-    randomSeed: number = 0;
-    log: (...args: any[]) => void;
+interface loadModelOpts {
+    disposeVariables?: boolean;
+}
 
-    constructor(env: any, config: PPOConfig) {
-        const configDefault: PPOConfig = {
-            nSteps: 512,
-            nEpochs: 10,
-            policyLearningRate: 1e-3,
-            valueLearningRate: 1e-3,
-            clipRatio: 0.2,
-            targetKL: 0.01,
-            useSDE: false,
-            netArch: {
-                'pi': [32, 32],
-                'vf': [32, 32]
-            },
-            activation: 'relu',
-            verbose: 0
-        };
+export default class PPO {
+  env: any;
+  config: PPOConfig;
+  actor: tf.LayersModel;
+  critic: tf.LayersModel;
+  logStd: tf.Variable | null = null; // for continuous
+  optPolicy: tf.Optimizer;
+  optValue: tf.Optimizer;
+  randomSeed = 0;
+  lastObservation: number[] | null = null;
+  numTimesteps = 0;
 
-        this.config = Object.assign({}, configDefault, config);
+  buffer: Buffer;
 
-        // Prepare network architecture
-        if (Array.isArray(this.config.netArch)) {
-            this.config.netArch = {
-                'pi': this.config.netArch,
-                'vf': this.config.netArch
-            }
-        }
-
-        // Initialize logger
-        this.log = (...args) => {
-            if (this.config.verbose! > 0) {
-                console.log('[PPO]', ...args)
-            }
-        }
-
-        // Initialize environment
-        this.env = env
-        if ((this.env.actionSpace.class == 'Discrete') && !this.env.actionSpace.dtype) {
-            this.env.actionSpace.dtype = 'int32'
-        } else if ((this.env.actionSpace.class == 'Box') && !this.env.actionSpace.dtype) {
-            this.env.actionSpace.dtype = 'float32'
-        }
-
-        // Initialize counters
-        this.numTimesteps = 0
-        this.lastObservation = null
-
-        // Initialize buffer
-        this.buffer = new Buffer(config)
-
-        // Initialize models for actor and critic
-        this.actor = this.createActor()
-        this.critic = this.createCritic()
-
-        // Initialize logStd (for continuous action space)
-        if (this.env.actionSpace.class == 'Box') {
-            this.logStd = tf.variable(tf.zeros([this.env.actionSpace.shape[0]]), true, 'logStd')
-        }
-
-        // Initialize optimizers
-        this.optPolicy = tf.train.adam(this.config.policyLearningRate)
-        this.optValue = tf.train.adam(this.config.valueLearningRate)
+  constructor(env: any, config: PPOConfig = {}) {
+    const cfg: PPOConfig = {
+      nSteps: 512,
+      nEpochs: 10,
+      policyLearningRate: 1e-3,
+      valueLearningRate: 1e-3,
+      clipRatio: 0.2,
+      targetKL: 0.01,
+      useSDE: false,
+      netArch: { pi: [32, 32], vf: [32, 32] },
+      activation: 'relu',
+      verbose: 0,
+      mode: 'sequential',
+      nEnvs: 1,
+      ...config,
+    };
+    this.config = cfg;
+    if (Array.isArray(cfg.netArch)) {
+      this.config.netArch = { pi: cfg.netArch, vf: cfg.netArch };
     }
 
-    createActor(): tf.LayersModel {
-        const input = tf.layers.input({ shape: this.env.observationSpace.shape });
-        let l: tf.SymbolicTensor = input;
+    this.env = env;
+    this.actor = this.createActor();
+    this.critic = this.createCritic();
 
-        this.config.netArch?.pi!.forEach((units: number) => {
-            l = tf.layers.dense({
-                units,
-                activation: this.config.activation || 'relu'
-            }).apply(l) as tf.SymbolicTensor;
+    if (this.env.actionSpace.class === 'Box') {
+      this.logStd = tf.variable(tf.zeros([this.env.actionSpace.shape[0]]), true, 'logStd');
+    }
+
+    this.optPolicy = tf.train.adam(this.config.policyLearningRate!);
+    this.optValue = tf.train.adam(this.config.valueLearningRate!);
+
+    this.buffer = new Buffer({ gamma: 0.99, lam: 0.95 });
+  }
+
+  private denseStack(input: tf.SymbolicTensor, units: number[]): tf.SymbolicTensor {
+    let x: tf.SymbolicTensor = input;
+    for (const u of units) {
+      x = tf.layers.dense({ units: u, activation: this.config.activation || 'relu' }).apply(x) as tf.SymbolicTensor;
+    }
+    return x;
+  }
+
+  createActor(): tf.LayersModel {
+    const input = tf.layers.input({ shape: this.env.observationSpace.shape });
+    let x = this.denseStack(input, (this.config.netArch as any).pi);
+    if (this.env.actionSpace.class === 'Discrete') {
+      x = tf.layers.dense({ units: this.env.actionSpace.n, activation: 'linear' }).apply(x) as tf.SymbolicTensor;
+    } else {
+      x = tf.layers.dense({ units: this.env.actionSpace.shape[0], activation: 'linear' }).apply(x) as tf.SymbolicTensor;
+    }
+    return tf.model({ inputs: input, outputs: x });
+  }
+
+  createCritic(): tf.LayersModel {
+    const input = tf.layers.input({ shape: this.env.observationSpace.shape });
+    const x = this.denseStack(input, (this.config.netArch as any).vf);
+    const v = tf.layers.dense({ units: 1, activation: 'linear' }).apply(x) as tf.SymbolicTensor;
+    return tf.model({ inputs: input, outputs: v });
+  }
+
+  predict(obs: tf.Tensor | number[]): tf.Tensor {
+    const x = Array.isArray(obs) ? tf.tensor2d([obs as number[]]) : obs;
+    return this.actor.predict(x) as tf.Tensor;
+  }
+
+  chooseMostLikelyResponse<T extends number[] | tf.Tensor>(logProbs: T): number {
+    if (Array.isArray(logProbs)) {
+      let bestI = 0; let bestV = -Infinity;
+      for (let i = 0; i < logProbs.length; i++) { const v = logProbs[i]; if (v > bestV) { bestV = v; bestI = i; } }
+      return bestI;
+    }
+    return tf.tidy(() => (logProbs as tf.Tensor).argMax().dataSync()[0]);
+  }
+
+  sampleAction(observationT: tf.Tensor): [tf.Tensor, tf.Tensor] {
+    return tf.tidy(() => {
+      const logits = tf.squeeze(this.actor.predict(observationT) as tf.Tensor, [0]); // [A] or [D]
+      let action: tf.Tensor;
+      if (this.env.actionSpace.class === 'Discrete') {
+        const logits2D = (logits as tf.Tensor1D).expandDims(0) as tf.Tensor2D;
+        action = tf.squeeze(tf.multinomial(logits2D, 1, this.randomSeed), [0]); // []
+      } else if (this.env.actionSpace.class === 'Box') {
+        action = tf.add(
+          tf.mul(tf.randomStandardNormal([this.env.actionSpace.shape[0]], 'float32', this.randomSeed), tf.exp(this.logStd!)),
+          logits
+        );
+      } else {
+        throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
+      }
+      return [logits, action];
+    });
+  }
+
+  logProbCategorical(logits: tf.Tensor, x: tf.Tensor): tf.Tensor {
+    return tf.tidy(() => {
+      const lastDim = logits.shape[logits.shape.length - 1];
+      let lsm = tf.logSoftmax(logits);                     // [A] or [N, A]
+      let idx = x as tf.Tensor;                            // [] or [N]
+      if (idx.rank === 0) { idx = idx.expandDims(0); }     // [] -> [1]
+      if (lsm.rank === 1) { lsm = lsm.expandDims(0); }     // [A] -> [1, A]
+      const oneHot = tf.oneHot(idx as tf.Tensor1D, lastDim); // [N, A]
+      const picked = tf.sum(tf.mul(oneHot, lsm), -1);      // [N]
+      return picked;
+    });
+  }
+
+  logProbNormal(mu: tf.Tensor, std: tf.Tensor, x: tf.Tensor): tf.Tensor {
+    return tf.tidy(() => {
+      const varT = tf.square(std);
+      const logScale = tf.log(std).sum(-1);
+      const diff = tf.sub(x, mu);
+      const quadratic = tf.sum(tf.square(diff).div(varT), -1).mul(0.5);
+      const constTerm = (mu.shape[mu.shape.length - 1]) * 0.5 * Math.log(2 * Math.PI);
+      return tf.mul(-1, quadratic.add(logScale).add(constTerm));
+    });
+  }
+
+  logProb(preds: tf.Tensor, actions: tf.Tensor): tf.Tensor {
+    if (this.env.actionSpace.class === 'Discrete') {
+      return this.logProbCategorical(preds, actions);
+    } else if (this.env.actionSpace.class === 'Box') {
+      return this.logProbNormal(preds, tf.exp(this.logStd!), actions);
+    }
+    throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
+  }
+
+  predictAction(observation: tf.Tensor | number[], deterministic = false): number {
+    if (deterministic) {
+      return tf.tidy(() => {
+        const pred = tf.squeeze(this.predict(observation), [0]);
+        return pred.argMax().dataSync()[0];
+      });
+    }
+    return tf.tidy(() => {
+      const pred1D = tf.squeeze(this.predict(observation), [0]);
+      const logits2D = (pred1D as tf.Tensor1D).expandDims(0) as tf.Tensor2D;
+      const sampled = tf.squeeze(tf.multinomial(logits2D, 1, this.randomSeed), [0]);
+      return sampled.dataSync()[0];
+    });
+  }
+
+  predictProbabilities(observation: tf.Tensor | number[]): number[] {
+    return tf.tidy(() => {
+      const logits = tf.squeeze(this.predict(observation), [0]);
+      const probs = tf.softmax(logits);
+      return probs.arraySync() as number[];
+    });
+  }
+
+  async collectRollouts(callback: BaseCallback): Promise<void> {
+    if (this.lastObservation === null) this.lastObservation = await this.env.reset();
+    this.buffer.reset();
+    await callback.onRolloutStart(this);
+
+    for (let step = 0; step < (this.config.nSteps || 0); step++) {
+      const [action, value, logprobability] = tf.tidy(() => {
+        const lastObservationT = tf.tensor2d([this.lastObservation as number[]]);
+        const [predsT, actionT] = this.sampleAction(lastObservationT);
+        const valueT = this.critic.predict(lastObservationT) as tf.Tensor;
+        const logProbT = this.logProb(predsT, actionT) as tf.Tensor1D;
+        const a = (actionT as tf.Tensor).dataSync()[0];
+        const v = (valueT as tf.Tensor).dataSync()[0];
+        const lp = logProbT.dataSync()[0];
+        return [a, v, lp];
+      });
+
+      const [newObservation, reward, done] = await this.env.step(action);
+      await callback.onStep({ ppo: this, action, reward, done });
+
+      this.buffer.add(this.lastObservation as number[], action, reward, value, logprobability);
+      this.lastObservation = newObservation;
+
+      if (done || step === (this.config.nSteps || 0) - 1) {
+        const lastValue = done ? 0 : tf.tidy(() => {
+          const newObservationT = tf.tensor2d([newObservation]);
+          const prediction = this.critic.predict(newObservationT) as tf.Tensor2D;
+          const result = (prediction as tf.Tensor).dataSync()[0] as number;
+          newObservationT.dispose();
+          prediction.dispose();
+          return result;
         });
+        this.buffer.finishTrajectory(lastValue as number);
+        this.lastObservation = await this.env.reset();
+      }
+    }
 
-        if (this.env.actionSpace.class === 'Discrete') {
-            l = tf.layers.dense({
-                units: this.env.actionSpace.n,
-                activation: 'linear' // or another appropriate activation function
-            }).apply(l) as tf.SymbolicTensor;
-        } else if (this.env.actionSpace.class === 'Box') {
-            l = tf.layers.dense({
-                units: this.env.actionSpace.shape[0],
-                activation: 'linear' // or another appropriate activation function
-            }).apply(l) as tf.SymbolicTensor;
-        } else {
-            throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
+    await callback.onRolloutEnd(this);
+  }
+
+  async collectRolloutsVectorized(callback: BaseCallback, nEnvs: number): Promise<void> {
+    // Function to spawn/clone envs without reprocessing heavy data.
+    const spawnEnv = async (i: number) => {
+      // Preferred: explicit factory if available
+      if (this.config.makeEnv) {
+        return await Promise.resolve(this.config.makeEnv());
+      }
+      // Try common cloning methods on the provided env
+      const base: any = this.env;
+      for (const fn of ['clone', 'copy', 'fork', 'spawn']) {
+        if (typeof base[fn] === 'function') {
+          const inst = await Promise.resolve(base[fn](i));
+          if (inst) return inst;
         }
-
-        return tf.model({ inputs: input, outputs: l });
-    }
-
-    createCritic(): tf.LayersModel {
-        const input = tf.layers.input({ shape: this.env.observationSpace.shape });
-        let l: tf.SymbolicTensor = input;
-
-        this.config.netArch?.vf!.forEach((units: number) => {
-            l = tf.layers.dense({
-                units,
-                activation: this.config.activation || 'relu'
-            }).apply(l) as tf.SymbolicTensor;
-        });
-
-        l = tf.layers.dense({
-            units: 1,
-            activation: 'linear' // Linear activation for the output layer
-        }).apply(l) as tf.SymbolicTensor;
-
-        return tf.model({ inputs: input, outputs: l });
-    }
-
-    sampleAction(observationT: tf.Tensor): [tf.Tensor, tf.Tensor] {
-        return tf.tidy(() => {
-            const preds = tf.squeeze(this.actor.predict(observationT) as tf.Tensor, [0]);
-            let action: tf.Tensor;
-
-            if (this.env.actionSpace.class === 'Discrete') {
-                action = tf.squeeze(tf.multinomial(preds as tf.Tensor2D, 1, this.randomSeed), [0]); // For discrete action space
-            } else if (this.env.actionSpace.class === 'Box') {
-                action = tf.add(
-                    tf.mul(
-                        tf.randomStandardNormal([this.env.actionSpace.shape[0]], 'float32', this.randomSeed), 
-                        tf.exp(this.logStd)
-                    ),
-                    preds
-                ); // For continuous action space
-            } else {
-                throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
-            }
-
-            return [preds, action];
-        });
-    }
-
-    logProbCategorical(logits: tf.Tensor, x: tf.Tensor): tf.Tensor {
-        return tf.tidy(() => {
-            const numActions = logits.shape[logits.shape.length - 1];
-            const logprobabilitiesAll = tf.logSoftmax(logits);
-            return tf.sum(
-                tf.mul(tf.oneHot(x.toInt(), numActions), logprobabilitiesAll),
-                logprobabilitiesAll.shape.length - 1
-            );
-        });
-    }
-
-    logProbNormal(loc: tf.Tensor, scale: tf.Tensor, x: tf.Tensor): tf.Tensor {
-        return tf.tidy(() => {
-            const logUnnormalized = tf.mul(
-                -0.5,
-                tf.square(
-                    tf.sub(
-                        tf.div(x, scale),
-                        tf.div(loc, scale)
-                    )
-                )
-            );
-            const logNormalization = tf.add(
-                tf.scalar(0.5 * Math.log(2.0 * Math.PI)),
-                tf.log(scale)
-            );
-            return tf.sum(
-                tf.sub(logUnnormalized, logNormalization),
-                logUnnormalized.shape.length - 1
-            );
-        });
-    }
-
-    logProb(preds: tf.Tensor, actions: tf.Tensor): tf.Tensor {
-        if (this.env.actionSpace.class === 'Discrete') {
-            return this.logProbCategorical(preds, actions);
-        } else if (this.env.actionSpace.class === 'Box') {
-            return this.logProbNormal(preds, tf.exp(this.logStd), actions);
-        } else {
-            throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
-        }
-    }
-    
-    predict(observation: tf.Tensor | number[]): tf.Tensor {
-        if (observation instanceof Array) {
-            observation = tf.tensor2d(observation, [1,observation.length]);
-        }
-
-        return this.actor.predict(observation) as tf.Tensor;
-    }
-
-    chooseMostLikelyResponse<T extends number[] | tf.Tensor>(logProbabilities: T): number {
-        const probsArray = tf.tidy(() => {
-          if (logProbabilities instanceof tf.Tensor) {
-            return logProbabilities.dataSync();
+      }
+      // As a last resort, try to construct a new instance from constructor with a shared context if provided
+      try {
+        if (base && base.constructor) {
+          if (typeof base.getContext === 'function') {
+            return new (base.constructor as any)(base.getContext());
           } else {
-            return logProbabilities as number[];
+            return new (base.constructor as any)();
           }
-        });
-        const probabilities = tf.exp(probsArray);
-        const sum = tf.sum(probabilities);
-        const normalizedProbabilities = probabilities.div(sum);
-        const indexOfMax = tf.argMax(normalizedProbabilities).dataSync()[0];
-      
-        return indexOfMax;
+        }
+      } catch { }
+      throw new Error('[PPO] vectorized mode requires either config.makeEnv() or an env.clone()/copy()/fork()/spawn() method (optionally using shared, preprocessed data).');
+    };
+
+    // Create N envs
+    const envs: any[] = [];
+    for (let i = 0; i < nEnvs; i++) {
+      const e = await spawnEnv(i);
+      envs.push(e);
     }
 
-    
-    predictAction(observation: tf.Tensor | number[], deterministic: boolean = false): number {
-        if (deterministic) {
-            const action = tf.tidy(() => {
-                const pred = tf.squeeze(this.predict(observation), [0]);
-                const action = this.chooseMostLikelyResponse(pred);
-                return action;
-            });
-            return action
+    // Reset all
+    let obs: any[] = await Promise.all(envs.map(e => e.reset()));
+    const dones: boolean[] = new Array(nEnvs).fill(false);
+    const buffers = Array.from({ length: nEnvs }, () => new Buffer({ gamma: 0.99, lam: 0.95 }));
+
+    await callback.onRolloutStart(this);
+
+    for (let t = 0; t < (this.config.nSteps || 0); t++) {
+      const [actions, values, logps] = tf.tidy(() => {
+        const obsT = tf.tensor2d(obs);     // [N, obs_dim]
+        const logits = this.actor.predict(obsT) as tf.Tensor;    // [N, A] or [N, D]
+        const valuesT = this.critic.predict(obsT) as tf.Tensor;  // [N, 1]
+        let actionsT: tf.Tensor;
+        if (this.env.actionSpace.class === 'Discrete') {
+          actionsT = tf.squeeze(tf.multinomial(logits as tf.Tensor2D, 1, this.randomSeed), [1]); // [N]
+        } else if (this.env.actionSpace.class === 'Box') {
+          const std = tf.exp(this.logStd!);          // [D]
+          const D = (logits as tf.Tensor2D).shape[1];
+          const noise = tf.randomStandardNormal([nEnvs, D], 'float32', this.randomSeed);
+          actionsT = tf.add(tf.mul(noise, std), logits); // [N, D]
         } else {
-            const action = tf.tidy(() => {
-                const pred = tf.squeeze(this.predict(observation), [0]);
-                const actions = tf.squeeze(tf.multinomial(pred.arraySync(), 1, this.randomSeed), [0]);
-                const action = actions.dataSync()[0];
-                return action;
-            });
-            return action
+          throw new Error('Unknown action space class: ' + this.env.actionSpace.class);
         }
-    }
-    
-    predictProbabilities(observation: tf.Tensor | number[]): number[] {
-        const probsArray = tf.tidy(() => {
-            const logProbabilities = tf.squeeze(this.predict(observation), [0]);
-            if (logProbabilities instanceof tf.Tensor) {
-              return logProbabilities.dataSync();
-            } else {
-              return logProbabilities as number[];
-            }
-          });
+        const logpT = this.logProb(logits, actionsT as tf.Tensor);
+        const a = Array.from((actionsT as tf.Tensor).dataSync());
+        const v = Array.from((valuesT as tf.Tensor).dataSync());
+        const lp = Array.from((logpT as tf.Tensor).dataSync());
+        return [a, v, lp];
+      });
 
-          const probabilities = tf.exp(probsArray);
-          const sum = tf.sum(probabilities);
-          const normalizedProbabilities = probabilities.div(sum);
-
-        return normalizedProbabilities.arraySync() as number[]
-    }
-    
-    trainPolicy(
-        observationBufferT: tf.Tensor, 
-        actionBufferT: tf.Tensor, 
-        logprobabilityBufferT: tf.Tensor, 
-        advantageBufferT: tf.Tensor
-    ): number {
-        const clipRatio = this.config.clipRatio ?? 0.2; // Provide a default value if undefined
-    
-        const optFunc = () => {
-            const predsT = this.actor.predict(observationBufferT) as tf.Tensor;
-            const diffT = tf.sub(
-                this.logProb(predsT, actionBufferT),
-                logprobabilityBufferT
-            );
-            const ratioT = tf.exp(diffT);
-            const minAdvantageT = tf.where(
-                tf.greater(advantageBufferT, 0),
-                tf.mul(tf.add(1, clipRatio), advantageBufferT),
-                tf.mul(tf.sub(1, clipRatio), advantageBufferT)
-            );
-            const policyLoss = tf.neg(tf.mean(
-                tf.minimum(tf.mul(ratioT, advantageBufferT), minAdvantageT)
-            ));
-            return policyLoss;
-        };
-    
-        return tf.tidy(() => {
-            const { value, grads } = this.optPolicy.computeGradients(optFunc);
-            this.optPolicy.applyGradients(grads);
-            const klTensor = tf.mean(tf.sub(
-                logprobabilityBufferT,
-                this.logProb(this.actor.predict(observationBufferT) as tf.Tensor, actionBufferT)
-            ));
-            // Ensure kl is a scalar by calling arraySync() on a scalar tensor
-            const kl = klTensor.arraySync() as number;
-            return kl;
-        });
+      const stepResults = await Promise.all(envs.map((e, i) => e.step((actions as any)[i])));
+      for (let i = 0; i < nEnvs; i++) {
+        const [nextObs, reward, done] = stepResults[i];
+        const value = Array.isArray((values as any)[i]) ? (values as any)[i][0] : (values as any)[i];
+        buffers[i].add(obs[i], (actions as any)[i], reward, value as number, (logps as any)[i] as number);
+        await callback.onStep({ ppo: this, action: (actions as any)[i], reward, done });
+        obs[i] = nextObs;
+        dones[i] = !!done;
+        if (dones[i]) {
+          buffers[i].finishTrajectory(0);
+          obs[i] = await envs[i].reset();
+          dones[i] = false;
+        }
+      }
     }
 
-    trainValue(observationBufferT: tf.Tensor, returnBufferT: tf.Tensor): void {
-        const optFunc = () => {
-            const valuesPredT = this.critic.predict(observationBufferT) as tf.Tensor;
-            return tf.losses.meanSquaredError(returnBufferT, valuesPredT);
-        };
-
-        tf.tidy(() => {
-            const { value, grads } = this.optValue.computeGradients(optFunc);
-            this.optValue.applyGradients(grads);
-        });
+    // Horizon reached; bootstrap for unfinished episodes
+    for (let i = 0; i < nEnvs; i++) {
+      const lastValue = tf.tidy(() => {
+        const o = tf.tensor2d([obs[i]]);
+        const v = this.critic.predict(o) as tf.Tensor2D;
+        const out = (v as tf.Tensor).dataSync()[0] as number;
+        o.dispose(); (v as tf.Tensor).dispose();
+        return out;
+      });
+      buffers[i].finishTrajectory(lastValue);
     }
 
-    _initCallback(callback: CallbackObject | BaseCallback | null): BaseCallback {
-        if (typeof callback === 'function') {
-            // Convert to 'unknown' first, then to the constructor type
-            const callbackConstructor = callback as unknown as new () => BaseCallback;
-            return new callbackConstructor();
-        }
-        if (typeof callback === 'object' && callback !== null) {
-            return new DictCallback(callback as CallbackObject);
-        }
-        return new BaseCallback();
-    }
-    
-    async collectRollouts(callback: BaseCallback): Promise<void> {
-        if (this.lastObservation === null) {
-            this.lastObservation = await this.env.reset();
-        }
-    
-        this.buffer.reset();
-        await callback.onRolloutStart(this);
-    
-        let sumReturn = 0;
-        let sumLength = 0;
-        let numEpisodes = 0;
-    
-        for (let step = 0; step < this.config.nSteps!; step++) {
-            // Predict action, value, and logprobability from last observation
-                const [preds, action, value, logprobability] = tf.tidy(() => {
-                    const lastObservationT = tf.tensor([this.lastObservation]);
-                    const [predsT, actionT] = this.sampleAction(lastObservationT);
-                    const valueT = this.critic.predict(lastObservationT) as tf.Tensor;
-                    const logProbTensor: tf.Tensor1D = this.logProb(predsT, actionT) as tf.Tensor1D;
-
-                    const output: any[] = [
-                        predsT.arraySync(),
-                        actionT.arraySync(),
-                        valueT.arraySync(),
-                        logProbTensor.dataSync()[0],
-                    ];
-
-                    lastObservationT.dispose();
-                    predsT.dispose();
-                    actionT.dispose();
-                    valueT.dispose();
-                    logProbTensor.dispose();
-
-                    return output;
-                });
-    
-            // Take action in environment
-            const [newObservation, reward, done] = await this.env.step(action);
-            sumReturn += reward;
-            sumLength += 1;
-    
-            // Update global timestep counter
-            this.numTimesteps += 1;
-    
-            await callback.onStep({ppo: this, action, reward, done});
-    
-            this.buffer.add(
-                this.lastObservation,
-                action,
-                reward,
-                value,
-                logprobability
-            );
-    
-            this.lastObservation = newObservation;
-    
-            if (done || step === this.config.nSteps! - 1){
-                const lastValue = done 
-                    ? 0 
-                    : tf.tidy(() => {
-                        const newObservationT = tf.tensor([newObservation]);
-                        const prediction = this.critic.predict(newObservationT) as tf.Tensor2D;
-                        const result = prediction.arraySync()[0][0] as number;
-                        newObservationT.dispose();
-                        prediction.dispose();
-                        return result;
-                    });
-                this.buffer.finishTrajectory(lastValue);
-                numEpisodes += 1;
-                this.lastObservation = await this.env.reset();
-            }
-        }
-    
-        await callback.onRolloutEnd(this);
+    // Merge buffers into the main buffer
+    this.buffer.reset();
+    for (const b of buffers) {
+      const [ob, ac, ad, rets, lp] = b.get();
+      this.buffer.observationBuffer.push(...ob);
+      this.buffer.actionBuffer.push(...ac);
+      this.buffer.advantageBuffer.push(...ad);
+      this.buffer.returnBuffer.push(...rets);
+      this.buffer.logprobabilityBuffer.push(...lp);
+      this.buffer.pointer += ob.length;
     }
 
-    async train() {
-        // Get values from the buffer
-        const [
-            observationBuffer,
-            actionBuffer,
-            advantageBuffer,
-            returnBuffer,
-            logprobabilityBuffer,
-        ] = this.buffer.get();
-    
-        const actionBufferShape = Array.isArray(actionBuffer[0]) ? [actionBuffer.length, actionBuffer[0].length] : [actionBuffer.length];
+    await callback.onRolloutEnd(this);
+  }
 
-        const [
-            observationBufferT,
-            actionBufferT,
-            advantageBufferT,
-            returnBufferT,
-            logprobabilityBufferT
-        ] = tf.tidy(() => {
-            const observationBufferT = tf.tensor(observationBuffer);
-            const actionBufferT = tf.tensor(actionBuffer, actionBufferShape);
-            const advantageBufferT = tf.tensor(advantageBuffer);
-            const returnBufferT = tf.tensor(returnBuffer).reshape([-1, 1]);
-            const logprobabilityBufferT = tf.tensor(logprobabilityBuffer);
+  trainPolicy(obsT: tf.Tensor, actT: tf.Tensor, oldLogpT: tf.Tensor, advT: tf.Tensor): number {
+    const clipRatio = this.config.clipRatio ?? 0.2;
+    const optFunc = () => {
+      const logits = this.actor.predict(obsT) as tf.Tensor;
+      const logp = this.logProb(logits, actT);
+      const ratio = tf.exp(tf.sub(logp, oldLogpT));
+      const clipped = tf.clipByValue(ratio, 1 - clipRatio, 1 + clipRatio).mul(advT);
+      const loss = tf.neg(tf.minimum(ratio.mul(advT), clipped).mean());
+      return loss as tf.Scalar;
+    };
+    const loss = this.optPolicy.minimize(optFunc, true) as tf.Scalar | null;
+    const kl = tf.tidy(() => {
+      const logits = this.actor.predict(obsT) as tf.Tensor;
+      const logp = this.logProb(logits, actT);
+      const ratio = tf.exp(tf.sub(logp, oldLogpT));
+      const klT = tf.mean(tf.sub(ratio, tf.log(ratio)).sub(1).mul(-1));
+      const out = (klT as tf.Tensor).dataSync()[0];
+      return out;
+    });
+    if (loss) if (loss) loss.dispose();
+    return kl;
+  }
 
-            return [
-                observationBufferT,
-                actionBufferT,
-                advantageBufferT,
-                returnBufferT,
-                logprobabilityBufferT
-            ];
-        });
-    
-        for (let i = 0; i < this.config.nEpochs!; i++) {
-            const kl = this.trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT);
-            if (kl > 1.5 * this.config.targetKL!) {
-                break;
-            }
-        }
-    
-        for (let i = 0;  i < this.config.nEpochs!; i++) {
-            this.trainValue(observationBufferT, returnBufferT);
-        }
-    
-        // Ensure tensors are disposed after use
-        observationBufferT.dispose();
-        actionBufferT.dispose();
-        advantageBufferT.dispose();
-        returnBufferT.dispose();
-        logprobabilityBufferT.dispose();
+  trainValue(obsT: tf.Tensor, retT: tf.Tensor): void {
+    const optFunc = () => {
+      const values = this.critic.predict(obsT) as tf.Tensor;
+      return tf.mean(tf.losses.meanSquaredError(retT, values)) as tf.Scalar;
+    };
+    tf.tidy(() => {
+      const { grads } = this.optValue.computeGradients(optFunc);
+      this.optValue.applyGradients(grads);
+    });
+  }
+
+  async train(): Promise<void> {
+    const [obs, act, adv, ret, logp] = this.buffer.get();
+    const obsT = tf.tensor2d(obs);
+    const actT = tf.tensor1d(act, 'int32');
+    const advT = tf.tensor1d(adv);
+    const retT = tf.tensor1d(ret);
+    const logpT = tf.tensor1d(logp);
+
+    const targetKL = this.config.targetKL ?? 0.01;
+
+    for (let epoch = 0; epoch < (this.config.nEpochs || 0); epoch++) {
+      const kl = this.trainPolicy(obsT, actT, logpT, advT);
+      if (kl > 1.5 * targetKL) break;
+      this.trainValue(obsT, retT);
     }
 
-    async learn(learnConfig: LearnConfig) {
-        const learnConfigDefault = {
-            'totalTimesteps': 1000,
-            'logInterval': 1,
-            'callback': null
-        };
-        let { 
-            totalTimesteps,
-            logInterval,
-            callback
-        } = { ...learnConfigDefault, ...learnConfig };
-    
-        callback = this._initCallback(callback);
-        
-        let iteration = 0;
-        
-        await callback.onTrainingStart(this);
-    
-        while (this.numTimesteps < totalTimesteps) {
-            await this.collectRollouts(callback);
-            iteration += 1;
-            if (logInterval && iteration % logInterval === 0) {
-                this.log(`Timesteps: ${this.numTimesteps}`);
-            }
-            await this.train();
-        }
-        
-        await callback.onTrainingEnd(this);
+    obsT.dispose(); actT.dispose(); advT.dispose(); retT.dispose(); logpT.dispose();
+  }
+
+  _initCallback(cb?: CallbackObject | BaseCallback | null): BaseCallback {
+    if (!cb) return new BaseCallback();
+    if (cb instanceof BaseCallback) return cb;
+    return new DictCallback(cb as CallbackObject);
+  }
+
+  async learn(cfg: { totalTimesteps?: number; logInterval?: number; callback?: CallbackObject | BaseCallback; mode?: 'sequential' | 'vectorized'; nEnvs?: number } = {}) {
+    const totalTimesteps = cfg.totalTimesteps ?? 2048;
+    const logInterval = cfg.logInterval ?? 1;
+    const callback = this._initCallback(cfg.callback ?? null);
+    const mode = cfg.mode ?? this.config.mode ?? 'sequential';
+    const nEnvs = cfg.nEnvs ?? this.config.nEnvs ?? 1;
+
+    await callback.onTrainingStart(this);
+    let timesteps = 0;
+    let it = 0;
+
+    while (timesteps < totalTimesteps) {
+      if (mode === 'vectorized' && nEnvs > 1) {
+        await this.collectRolloutsVectorized(callback, nEnvs);
+        timesteps += (this.config.nSteps || 0) * nEnvs;
+      } else {
+        await this.collectRollouts(callback);
+        timesteps += (this.config.nSteps || 0);
+      }
+      await this.train();
+      it += 1;
+      if (it % logInterval === 0 && this.config.verbose) {
+        console.log(`[PPO] Iteration ${it} timesteps=${timesteps} mode=${mode} nEnvs=${nEnvs}`);
+      }
+    }
+    await callback.onTrainingEnd(this);
+  }
+
+  setRandomSeed(seed: number) { this.randomSeed = seed; }
+
+  /** --------- Minimal JSON persistence for demo (weights only) ---------- */
+  _serialize(object: any = this) {
+    const attributes: any = {};
+    for (const key in object) {
+      if (object.hasOwnProperty(key) && typeof object[key] !== 'function' && !(object[key] instanceof tf.LayersModel)) {
+        attributes[key] = object[key];
+      }
     }
 
-    _serialize(object:any = this) {
-        const attributes: any = {};
-        for (const key in object) {
-            if (object.hasOwnProperty(key) && typeof object[key] !== 'function' && !(object[key] instanceof tf.LayersModel)) {
-                attributes[key] = object[key];
-            }
-        }
+    return attributes
+  }
 
-        return attributes
+  _deserialize(data: any, object: any = this) {
+    for (const key in data) {
+      if (data.hasOwnProperty(key) && object.hasOwnProperty(key)) {
+        object[key] = data[key];
+      }
+    }
+  }
+
+  _checkPackageSave(path: string) {
+    //Check if Running in Node - and Throw an Error If Not
+    if (typeof window !== 'undefined') {
+      throw new Error('This method only works in node');
     }
 
-    _deserialize(data: any, object:any=this) {
-        for (const key in data) {
-            if (data.hasOwnProperty(key) && object.hasOwnProperty(key)) {
-                object[key] = data[key];
-            }
-        }
+    //Check if Path Exists - and Throw an Error If Not
+    if (!fs.existsSync(path)) {
+      throw new Error('Path does not exist');
     }
 
-    async _convertModelWeightsToJSON(model: tf.LayersModel) {
-        const weights = model.getWeights();
-        const weightData = weights.map(w => w.arraySync());
-        return weightData;
+    return true
+  }
+
+  async savePackage(path: string, config?: ISavePackageOptions, callback?: Function) {
+    this._checkPackageSave(path);
+    //Save the Actor and Critic Models
+    fs.mkdirSync(`${path}/actor`, { recursive: true });
+    fs.mkdirSync(`${path}/critic`, { recursive: true });
+
+    //Save the PPO Config & Buffer
+    const model_object = this._serialize();
+    if (!(config?.saveEnvironment)) {
+      delete model_object['env'];
+    }
+    if (!(config?.saveBuffer)) {
+      delete model_object['buffer'];
+    }
+    const model_json = JSON.stringify(model_object);
+
+    const saved_models = Promise.all([
+      fs.writeFile(`${path}/model.json`, model_json, 'utf-8', () => { }),
+      this.actor.save(`file://${path}/actor`),
+      this.critic.save(`file://${path}/critic`),
+    ]);
+
+    if (callback) {
+      await saved_models.catch((err: any) => { throw new Error(err) }).finally(() => callback());
+    } else {
+      await saved_models.catch((err: any) => { throw new Error(err) });
+    }
+  }
+
+  async loadPackage(path: string, callback?: Function, args?: loadModelOpts) {
+    this._checkPackageSave(path);
+    if (args?.disposeVariables) {
+      tf.disposeVariables();
     }
 
-    async toJSON(): Promise<string> {
-        //Get PPO Attributes
-        const model_object = this._serialize();
-        model_object['buffer'] = this._serialize(this.buffer); 
-        
-        const [ actor_w , critic_w ] = await Promise.all([
-            this._convertModelWeightsToJSON(this.actor),
-            this._convertModelWeightsToJSON(this.critic)
-        ]);
-        
-        model_object['actor'] = {
-            'architecture': this.actor.toJSON(null, false),
-            'weights': actor_w
-        }
+    //Load the Actor and Critic Models
+    const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');
+    const model_object = JSON.parse(model_json);
+    const [actor, critic] = await Promise.all([
+      tf.loadLayersModel(`file://${path}/actor/model.json`),
+      tf.loadLayersModel(`file://${path}/critic/model.json`),
+    ]);
 
-        model_object['critic'] = {
-            'architecture': this.critic.toJSON(null, false),
-            'weights': critic_w
-        }
+    // Rebuild the PPO Config & Buffer
+    this.config = model_object.config;
+    this._deserialize(model_object.buffer, this.buffer);
 
-        const model_json = JSON.stringify(model_object);
-        return model_json
+    // Rebuild the actor and critic models
+    this.actor = actor;
+    this.critic = critic;
+
+    if (callback) {
+      callback();
     }
-
-    async fromJSON(jsonString: string) {
-        const modelObject = JSON.parse(jsonString);
-
-        // Rebuild the PPO Config & Buffer
-        this.config = modelObject.config;
-        this._deserialize(modelObject.buffer, this.buffer);
-
-        // Rebuild the actor and critic models
-        this.actor = await this._rebuildModelFromJSON(modelObject.actor);
-        this.critic = await this._rebuildModelFromJSON(modelObject.critic);
-    }
-
-    async _rebuildModelFromJSON(modelData: any) {
-        // Create a model from the architecture
-        const model = await tf.loadLayersModel(tf.io.fromMemory(modelData.architecture));
-
-        // Restore the weights
-        const weights = modelData.weights.map((w: number) => tf.tensor(w));
-        model.setWeights(weights);
-
-        return model;
-    }
-
-    _checkPackageSave(path: string) {
-        //Check if Running in Node - and Throw an Error If Not
-        if (typeof window !== 'undefined') {
-            throw new Error('This method only works in node');
-        }
-
-        //Check if Path Exists - and Throw an Error If Not
-        if (!fs.existsSync(path)) {
-            throw new Error('Path does not exist');
-        }
-
-        return true
-    }
-
-    async savePackage(path: string, config?: ISavePackageOptions, callback?: Function) {
-        this._checkPackageSave(path);
-        //Save the Actor and Critic Models
-        fs.mkdirSync(`${path}/actor`, { recursive: true });
-        fs.mkdirSync(`${path}/critic`, { recursive: true });
-        
-        //Save the PPO Config & Buffer
-        const model_object = this._serialize();
-        if (!(config?.saveEnvironment)){
-            delete model_object['env'];
-        }
-        if (!(config?.saveBuffer)){
-            delete model_object['buffer'];
-        }
-        const model_json = JSON.stringify(model_object);
-
-        const saved_models = Promise.all([
-            fs.writeFile(`${path}/model.json`, model_json, 'utf-8', () => {}),
-            this.actor.save(`file://${path}/actor`),
-            this.critic.save(`file://${path}/critic`),
-        ]);
-
-        if (callback){
-            await saved_models.catch((err: any) => { throw new Error(err) }).finally(() => callback());
-        } else {
-            await saved_models.catch((err: any) => { throw new Error(err) });
-        }
-    }
-
-    async loadPackage(path: string, callback?: Function, args?: loadModelOpts) {
-        this._checkPackageSave(path);
-        if (args?.disposeVariables){
-            tf.disposeVariables();
-        }
-
-        //Load the Actor and Critic Models
-        const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');
-        const model_object = JSON.parse(model_json);
-        const [ actor, critic ] = await Promise.all([
-            tf.loadLayersModel(`file://${path}/actor/model.json`),
-            tf.loadLayersModel(`file://${path}/critic/model.json`),
-        ]);
-
-        // Rebuild the PPO Config & Buffer
-        this.config = model_object.config;
-        this._deserialize(model_object.buffer, this.buffer);
-
-        // Rebuild the actor and critic models
-        this.actor = actor;
-        this.critic = critic;
-
-        if (callback){
-            callback();
-        }
-    }
-
-    setRandomSeed(seed: number) {
-        this.randomSeed = seed;
-    }
+  }
 }
 
 if (typeof module === 'object' && module.exports) {
-    module.exports = PPO;
+  module.exports = PPO;
 }
