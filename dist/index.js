@@ -404,14 +404,19 @@ export class PPO {
                 const lastObservationT = tf.tensor([this.lastObservation]);
                 const [predsT, actionT] = this.sampleAction(lastObservationT);
                 const valueT = this.critic.predict(lastObservationT);
-                const logprobabilityNum = this.logProb(predsT, actionT).dataSync()[0];
-                const valueT_data = valueT.arraySync();
-                return [
+                const logProbTensor = this.logProb(predsT, actionT);
+                const output = [
                     predsT.arraySync(),
                     actionT.arraySync(),
-                    valueT_data,
-                    logprobabilityNum
+                    valueT.arraySync(),
+                    logProbTensor.dataSync()[0],
                 ];
+                lastObservationT.dispose();
+                predsT.dispose();
+                actionT.dispose();
+                valueT.dispose();
+                logProbTensor.dispose();
+                return output;
             });
             // Take action in environment
             const [newObservation, reward, done] = await this.env.step(action);
@@ -426,8 +431,12 @@ export class PPO {
                 const lastValue = done
                     ? 0
                     : tf.tidy(() => {
-                        const prediction = this.critic.predict(tf.tensor([newObservation]));
-                        return prediction.arraySync()[0][0];
+                        const newObservationT = tf.tensor([newObservation]);
+                        const prediction = this.critic.predict(newObservationT);
+                        const result = prediction.arraySync()[0][0];
+                        newObservationT.dispose();
+                        prediction.dispose();
+                        return result;
                     });
                 this.buffer.finishTrajectory(lastValue);
                 numEpisodes += 1;
@@ -440,13 +449,20 @@ export class PPO {
         // Get values from the buffer
         const [observationBuffer, actionBuffer, advantageBuffer, returnBuffer, logprobabilityBuffer,] = this.buffer.get();
         const actionBufferShape = Array.isArray(actionBuffer[0]) ? [actionBuffer.length, actionBuffer[0].length] : [actionBuffer.length];
-        const [observationBufferT, actionBufferT, advantageBufferT, returnBufferT, logprobabilityBufferT] = tf.tidy(() => [
-            tf.tensor(observationBuffer),
-            tf.tensor(actionBuffer, actionBufferShape),
-            tf.tensor(advantageBuffer),
-            tf.tensor(returnBuffer).reshape([-1, 1]),
-            tf.tensor(logprobabilityBuffer)
-        ]);
+        const [observationBufferT, actionBufferT, advantageBufferT, returnBufferT, logprobabilityBufferT] = tf.tidy(() => {
+            const observationBufferT = tf.tensor(observationBuffer);
+            const actionBufferT = tf.tensor(actionBuffer, actionBufferShape);
+            const advantageBufferT = tf.tensor(advantageBuffer);
+            const returnBufferT = tf.tensor(returnBuffer).reshape([-1, 1]);
+            const logprobabilityBufferT = tf.tensor(logprobabilityBuffer);
+            return [
+                observationBufferT,
+                actionBufferT,
+                advantageBufferT,
+                returnBufferT,
+                logprobabilityBufferT
+            ];
+        });
         for (let i = 0; i < this.config.nEpochs; i++) {
             const kl = this.trainPolicy(observationBufferT, actionBufferT, logprobabilityBufferT, advantageBufferT);
             if (kl > 1.5 * this.config.targetKL) {
@@ -456,13 +472,12 @@ export class PPO {
         for (let i = 0; i < this.config.nEpochs; i++) {
             this.trainValue(observationBufferT, returnBufferT);
         }
-        tf.dispose([
-            observationBufferT,
-            actionBufferT,
-            advantageBufferT,
-            returnBufferT,
-            logprobabilityBufferT
-        ]);
+        // Ensure tensors are disposed after use
+        observationBufferT.dispose();
+        actionBufferT.dispose();
+        advantageBufferT.dispose();
+        returnBufferT.dispose();
+        logprobabilityBufferT.dispose();
     }
     async learn(learnConfig) {
         const learnConfigDefault = {
