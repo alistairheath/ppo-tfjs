@@ -13,11 +13,11 @@ export interface CallbackObject {
 }
 
 export class BaseCallback {
-  async onTrainingStart(_ctx: PPO) {}
-  async onTrainingEnd(_ctx: PPO) {}
-  async onRolloutStart(_ctx: PPO) {}
-  async onRolloutEnd(_ctx: PPO) {}
-  async onStep(_info: { ppo: PPO; action: number; reward: number; done: boolean }) {}
+  async onTrainingStart(_ctx: PPO) { }
+  async onTrainingEnd(_ctx: PPO) { }
+  async onRolloutStart(_ctx: PPO) { }
+  async onRolloutEnd(_ctx: PPO) { }
+  async onStep(_info: { ppo: PPO; action: number; reward: number; done: boolean }) { }
 }
 
 export class DictCallback extends BaseCallback {
@@ -131,6 +131,15 @@ export interface PPOConfig {
   nEnvs?: number;
   /** factory to create new env instances for vectorized mode */
   makeEnv?: () => any | Promise<any>;
+}
+
+interface ISavePackageOptions {
+    saveEnvironment?: boolean;
+    saveBuffer?: boolean;
+}
+
+interface loadModelOpts {
+    disposeVariables?: boolean;
 }
 
 export default class PPO {
@@ -357,7 +366,7 @@ export default class PPO {
             return new (base.constructor as any)();
           }
         }
-      } catch {}
+      } catch { }
       throw new Error('[PPO] vectorized mode requires either config.makeEnv() or an env.clone()/copy()/fork()/spawn() method (optionally using shared, preprocessed data).');
     };
 
@@ -531,24 +540,96 @@ export default class PPO {
   setRandomSeed(seed: number) { this.randomSeed = seed; }
 
   /** --------- Minimal JSON persistence for demo (weights only) ---------- */
-  async save(path: string) {
-    const actSave = await this.actor.save(tf.io.withSaveHandler(async d => {
-      fs.writeFileSync(path + '.actor.json', JSON.stringify(d));
-      return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: 'JSON' as const } };
-    }));
-    const crtSave = await this.critic.save(tf.io.withSaveHandler(async d => {
-      fs.writeFileSync(path + '.critic.json', JSON.stringify(d));
-      return { modelArtifactsInfo: { dateSaved: new Date(), modelTopologyType: 'JSON' as const } };
-    }));
-    return { actSave, crtSave };
+  _serialize(object: any = this) {
+    const attributes: any = {};
+    for (const key in object) {
+      if (object.hasOwnProperty(key) && typeof object[key] !== 'function' && !(object[key] instanceof tf.LayersModel)) {
+        attributes[key] = object[key];
+      }
+    }
+
+    return attributes
   }
 
-  async load(path: string) {
-    const actorData = JSON.parse(fs.readFileSync(path + '.actor.json', 'utf8'));
-    const criticData = JSON.parse(fs.readFileSync(path + '.critic.json', 'utf8'));
-    // @ts-ignore
-    this.actor = await tf.loadLayersModel(tf.io.fromMemory(actorData.modelTopology, actorData.weightSpecs, actorData.weightData));
-    // @ts-ignore
-    this.critic = await tf.loadLayersModel(tf.io.fromMemory(criticData.modelTopology, criticData.weightSpecs, criticData.weightData));
+  _deserialize(data: any, object: any = this) {
+    for (const key in data) {
+      if (data.hasOwnProperty(key) && object.hasOwnProperty(key)) {
+        object[key] = data[key];
+      }
+    }
   }
+
+  _checkPackageSave(path: string) {
+    //Check if Running in Node - and Throw an Error If Not
+    if (typeof window !== 'undefined') {
+      throw new Error('This method only works in node');
+    }
+
+    //Check if Path Exists - and Throw an Error If Not
+    if (!fs.existsSync(path)) {
+      throw new Error('Path does not exist');
+    }
+
+    return true
+  }
+
+  async savePackage(path: string, config?: ISavePackageOptions, callback?: Function) {
+    this._checkPackageSave(path);
+    //Save the Actor and Critic Models
+    fs.mkdirSync(`${path}/actor`, { recursive: true });
+    fs.mkdirSync(`${path}/critic`, { recursive: true });
+
+    //Save the PPO Config & Buffer
+    const model_object = this._serialize();
+    if (!(config?.saveEnvironment)) {
+      delete model_object['env'];
+    }
+    if (!(config?.saveBuffer)) {
+      delete model_object['buffer'];
+    }
+    const model_json = JSON.stringify(model_object);
+
+    const saved_models = Promise.all([
+      fs.writeFile(`${path}/model.json`, model_json, 'utf-8', () => { }),
+      this.actor.save(`file://${path}/actor`),
+      this.critic.save(`file://${path}/critic`),
+    ]);
+
+    if (callback) {
+      await saved_models.catch((err: any) => { throw new Error(err) }).finally(() => callback());
+    } else {
+      await saved_models.catch((err: any) => { throw new Error(err) });
+    }
+  }
+
+  async loadPackage(path: string, callback?: Function, args?: loadModelOpts) {
+    this._checkPackageSave(path);
+    if (args?.disposeVariables) {
+      tf.disposeVariables();
+    }
+
+    //Load the Actor and Critic Models
+    const model_json = fs.readFileSync(`${path}/model.json`, 'utf-8');
+    const model_object = JSON.parse(model_json);
+    const [actor, critic] = await Promise.all([
+      tf.loadLayersModel(`file://${path}/actor/model.json`),
+      tf.loadLayersModel(`file://${path}/critic/model.json`),
+    ]);
+
+    // Rebuild the PPO Config & Buffer
+    this.config = model_object.config;
+    this._deserialize(model_object.buffer, this.buffer);
+
+    // Rebuild the actor and critic models
+    this.actor = actor;
+    this.critic = critic;
+
+    if (callback) {
+      callback();
+    }
+  }
+}
+
+if (typeof module === 'object' && module.exports) {
+  module.exports = PPO;
 }
